@@ -2,7 +2,7 @@
 
 import { creditsLeft } from "@/lib/billing";
 import { hasHostedCredits } from "@/lib/llm";
-import { displayName, getWorkspace } from "@/lib/workspace";
+import { authorIn, getWorkspace } from "@/lib/workspace";
 
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
@@ -190,7 +190,7 @@ export async function setGrokRoute(route: GrokRoute) {
 /** In a team workspace, messages carry who wrote them. */
 async function author() {
   const user = await requireSessionUser();
-  return { uid: user.ws, by: user.ws !== user.id ? { id: user.id, name: displayName(user) } : undefined };
+  return { uid: user.ws, by: await authorIn(user.ws, user) };
 }
 
 export async function askChief(text: string, files?: Attachment[]) {

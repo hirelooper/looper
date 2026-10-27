@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { inviteLink, newTeamWorkspace, removeFromWorkspace, renameCurrentWorkspace } from "@/app/workspace-actions";
+import { inviteLink, makePersonalTeam, newTeamWorkspace, removeFromWorkspace, renameCurrentWorkspace } from "@/app/workspace-actions";
 import { Button } from "@/components/ui";
 
 type Member = { userId: string; name: string; email?: string; avatar?: string; role: "owner" | "member" };
@@ -16,6 +16,7 @@ export function WorkspaceView(props: { me: string; workspace: { id: string; name
   const [link, setLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [teamName, setTeamName] = useState("");
+  const [shareName, setShareName] = useState("");
 
   const run = (fn: () => Promise<unknown>) =>
     start(async () => {
@@ -61,8 +62,34 @@ export function WorkspaceView(props: { me: string; workspace: { id: string; name
     <div className="mx-auto flex max-w-[720px] flex-col gap-4 px-4 py-8 sm:px-6">
       <div>
         <h1 className="text-[1.75rem] font-semibold tracking-[-0.025em]">{workspace.kind === "team" ? workspace.name : "Personal workspace"}</h1>
-        <p className="mt-1 text-[0.9375rem] text-mute">{workspace.kind === "team" ? `${props.members.length} member${props.members.length === 1 ? "" : "s"}` : "Only you. Create a team workspace to work with others."}</p>
+        <p className="mt-1 text-[0.9375rem] text-mute">{workspace.kind === "team" ? `${props.members.length} member${props.members.length === 1 ? "" : "s"}` : "Only you. Add people to it, or start a separate team workspace."}</p>
       </div>
+
+      {workspace.kind === "personal" && workspace.isOwner && (
+        <section className="tile p-6">
+          <div className="text-[1.125rem] font-semibold">Add people to this workspace</div>
+          <p className="mt-1 text-[0.875rem] text-mute">
+            Turns it into a team workspace. Your loopers, boards, chats and apps stay as they are, and everyone you invite works with them too.{props.billing ? " Teams are on the Team plan." : ""}
+          </p>
+          <form
+            className="mt-4 flex flex-wrap gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                const teamName = shareName.trim() || "Team";
+                const r = await makePersonalTeam(teamName);
+                setName(teamName);
+                setLink(r.url);
+                setCopied(false);
+                router.refresh();
+              });
+            }}
+          >
+            <input value={shareName} onChange={(e) => setShareName(e.target.value)} placeholder="Team name, e.g. Acme" aria-label="Team name" className="h-10 min-w-0 flex-1 rounded-full bg-ink/[0.05] px-4 text-[0.875rem] outline-none focus:bg-ink/[0.08]" />
+            <Button disabled={pending}>Make it a team</Button>
+          </form>
+        </section>
+      )}
 
       {workspace.kind === "personal" && create}
 

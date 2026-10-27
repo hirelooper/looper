@@ -7,7 +7,8 @@ import type { User } from "./types";
 
 // People and the workspaces they share. A workspace holds everything (loopers, boards, apps,
 // settings); its data lives under the workspace id, which for your personal workspace is your
-// user id, so personal data written before teams existed stays where it is.
+// user id, so personal data written before teams existed stays where it is. A personal workspace
+// can become a team (kind "team") and keeps that id.
 
 const userKey = (id: string) => `user:${id}`;
 const identityKey = (identity: string) => `identity:${identity}`;
@@ -168,6 +169,25 @@ export async function createTeamWorkspace(owner: User, name: string): Promise<Wo
   });
   await addWorkspaceToUser(owner.id, id);
   return ws;
+}
+
+/**
+ * Turn your personal workspace into a team one so you can add people. It keeps its id (your user id),
+ * so loopers, boards and billing stay where they are; from then on it behaves like any team.
+ */
+export async function makeTeam(owner: User, name: string): Promise<Workspace> {
+  await ensurePersonal(owner);
+  return mutateWorkspace(owner.id, (w) => {
+    if (w.ownerId !== owner.id) throw new Error("Only the owner can turn this workspace into a team.");
+    if (w.kind === "team") throw new Error("This workspace is already a team.");
+    Object.assign(w, { name: name.trim().slice(0, 60) || "Team", kind: "team" });
+    return { ...w };
+  });
+}
+
+/** Who wrote a message: named in a team workspace, where several people share the chats. */
+export async function authorIn(wsId: string, user: User) {
+  return (await getWorkspace(wsId))?.kind === "team" ? { id: user.id, name: displayName(user) } : undefined;
 }
 
 export async function renameWorkspace(id: string, name: string) {
