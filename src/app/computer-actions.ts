@@ -5,7 +5,7 @@ import { beginLooperReply } from "@/lib/agent";
 import { finishTakeover, pingTakeover, startTakeover, takeoverOpen, wipeComputer } from "@/lib/computer";
 import { mutate, read } from "@/lib/db";
 import { requireSessionUser, requireUid } from "@/lib/session";
-import { displayName } from "@/lib/workspace";
+import { authorIn } from "@/lib/workspace";
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 async function attempt<T>(fn: () => Promise<T>): Promise<Result<T>> {
@@ -76,7 +76,7 @@ export async function endTakeover(looperId: string, note?: string) {
       .filter(Boolean)
       .join("\n");
     // In a shared workspace, say which teammate it was.
-    const reply = await beginLooperReply(uid, looper.id, text, user.ws !== user.id ? { id: user.id, name: displayName(user) } : undefined);
+    const reply = await beginLooperReply(uid, looper.id, text, await authorIn(user.ws, user));
     after(reply);
     return { since: reply.since };
   });

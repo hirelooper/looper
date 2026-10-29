@@ -14,14 +14,15 @@ type Result = { ok: true; url: string } | { ok: false; error: string };
 const fail = (e: unknown): Result => ({ ok: false, error: e instanceof Error ? e.message : String(e) });
 
 /**
- * Start checkout. Personal goes on your personal workspace; Team goes on the open team workspace,
- * or a new one named `teamName` when you're in your personal one.
+ * Start checkout. Personal goes on your personal workspace; Team goes on the open team workspace
+ * (a personal one turned into a team counts), or a new one named `teamName` when you're in your personal one.
  */
 export async function startCheckout(plan: Plan, interval: Interval, teamName?: string, template?: string): Promise<Result> {
   try {
     const user = await requireSessionUser();
     let wsId = plan === "personal" ? user.id : user.ws;
-    if (plan === "team" && wsId === user.id) {
+    if (plan === "personal" && (await getWorkspace(wsId))?.kind === "team") throw new Error("Your personal workspace is a team now. Choose the Team plan.");
+    if (plan === "team" && (await getWorkspace(wsId))?.kind !== "team") {
       wsId = (await createTeamWorkspace(user, teamName || "Team")).id;
       await setWorkspace(wsId);
     }

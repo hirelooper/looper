@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { requireSessionUser, setWorkspace } from "@/lib/session";
-import { acceptInvite, createInvite, createTeamWorkspace, getWorkspace, removeMember, renameWorkspace, roleIn } from "@/lib/workspace";
+import { acceptInvite, createInvite, createTeamWorkspace, getWorkspace, makeTeam, removeMember, renameWorkspace, roleIn } from "@/lib/workspace";
 
 async function origin() {
   const h = await headers();
@@ -22,6 +22,15 @@ export async function newTeamWorkspace(name: string) {
   const ws = await createTeamWorkspace(user, name);
   await setWorkspace(ws.id);
   return { id: ws.id };
+}
+
+/** Turn your personal workspace into a team and hand back a first invite link. */
+export async function makePersonalTeam(name: string) {
+  const user = await requireSessionUser();
+  if (user.ws !== user.id) throw new Error("Open your personal workspace to turn it into a team.");
+  const ws = await makeTeam(user, name);
+  const invite = await createInvite(ws.id, user.id);
+  return { url: `${await origin()}/invite/${invite.token}` };
 }
 
 export async function renameCurrentWorkspace(name: string) {
