@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { getState } from "../actions";
 import { WelcomeFlow } from "@/components/welcome-flow";
 import { requireUser } from "@/lib/session";
-import { ACCENTS, modelReady } from "@/lib/types";
+import { ACCENTS, modelReady, ownModelReady } from "@/lib/types";
 import { getWorkspace } from "@/lib/workspace";
 
 // Reading the website and drafting a looper both ask the model, and the first run starts here.
@@ -23,6 +23,7 @@ export default async function WelcomePage({ searchParams }: PageProps<"/welcome"
       profile={state.profile}
       workspace={{ name: team ? ws.name : "", team, canRename: team && ws.ownerId === user.id }}
       ready={modelReady(state.settings)}
+      freeCredits={!ownModelReady(state.settings) && (state.settings.creditsLeft ?? 0) > 0 ? state.settings.creditsLeft : undefined}
       resume={l ? { id: l.id, name: l.name, color: l.color, firstSkillId: work?.id, firstSkillName: work?.name } : undefined}
       notice={notice}
       taken={state.loopers.map((x) => x.name)}

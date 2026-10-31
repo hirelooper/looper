@@ -7,7 +7,7 @@ import { areaOf } from "@/lib/types";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { billingEnabled, creditsLeft, hasAccess } from "@/lib/billing";
-import { hasHostedCredits } from "@/lib/llm";
+import { hasHostedCredits, ownModelConnected } from "@/lib/llm";
 import { currentUser } from "@/lib/session";
 import { isAdmin } from "@/lib/usage";
 import { getUser, getWorkspace, workspacesOf } from "@/lib/workspace";
@@ -54,9 +54,9 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       skills: l.skills.map((s) => ({ id: s.id, name: s.name })),
     };
   });
-  // Included Claude credits are granted once per plan; show what's left until they run out.
+  // Included Claude credits (signup, then once per plan); show what's left, and invite a plan until one is connected.
   const granted = ws?.credits?.granted ?? 0;
-  const credits = billingEnabled() && hasHostedCredits() && granted > 0 ? { left: creditsLeft(ws), granted } : undefined;
+  const credits = hasHostedCredits() && granted > 0 ? { left: creditsLeft(ws), granted, invite: !ownModelConnected(db.settings) } : undefined;
   const lastChief = db.chief.filter((m) => m.role === "assistant").at(-1)?.content.replace(/\s+/g, " ").slice(0, 120);
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:flex-row">

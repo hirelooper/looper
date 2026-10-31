@@ -9,7 +9,7 @@ import { API_BASE, CLI_PROXY_BASE, cliProxyHeaders, grokAccessToken, GROK_USAGE_
 import { creditsLeft, spendCredits } from "./billing";
 import { isLocalServer } from "./db";
 import { getCatalog, priceOf, recommendedModel, usdOf, type Catalog, type TokenUsage } from "./models";
-import { getWorkspace } from "./workspace";
+import { getWorkspace, grantSignupCredits } from "./workspace";
 import type { ModelChoice, ModelMenu, ModelOption, ModelPrice, Payer, Provider, Settings } from "./types";
 import { PROVIDERS } from "./types";
 
@@ -42,10 +42,13 @@ const payerOf = (mode: string): Payer => (mode === "credits" ? "us" : mode === "
 /** ChatGPT signed in through the Codex CLI's login; it runs anywhere and uses the API's model ids. */
 const viaCodex = (settings: Settings) => settings.oauth.openai?.via === "codex";
 
-/** Can this provider be called: included credits on this server, a sign-in (official ChatGPT only on your own machine), or a key. */
-export function usable(settings: Settings, p: Provider) {
+/**
+ * Can this provider be called: included credits on this server (and, when `credits` is given, some
+ * left), a sign-in (official ChatGPT only on your own machine), or a key.
+ */
+export function usable(settings: Settings, p: Provider, credits?: number) {
   const mode = modeOf(settings, p);
-  if (mode === "credits") return p === "anthropic" && hasHostedCredits();
+  if (mode === "credits") return p === "anthropic" && hasHostedCredits() && (credits === undefined || credits > 0);
   if (mode === "oauth") return !!settings.oauth[p] && (p !== "openai" || isLocalServer() || viaCodex(settings));
   return !!settings.apiKeys[p];
 }
@@ -55,17 +58,25 @@ export const defaultChoice = (settings: Settings): ModelChoice => settings.defau
 
 /**
  * The model a call uses: the chat's pick, else the workspace default, else any connected provider.
- * A pick whose provider was disconnected falls through to the next.
+ * A pick whose provider was disconnected, or whose included credits ran out, falls through to the next.
  */
-export function resolveChoice(settings: Settings, choice?: ModelChoice): ModelChoice {
+export function resolveChoice(settings: Settings, choice?: ModelChoice, credits?: number): ModelChoice {
   const candidates = [choice, settings.defaultModel, { provider: settings.provider }, ...PROVIDERS.map((p) => ({ provider: p.id }))];
-  return candidates.find((c): c is ModelChoice => !!c && usable(settings, c.provider)) ?? choice ?? defaultChoice(settings);
+  return candidates.find((c): c is ModelChoice => !!c && usable(settings, c.provider, credits)) ?? choice ?? defaultChoice(settings);
+}
+
+/** Included credits left for a workspace; a personal one that never got its signup credits gets them now. */
+export async function workspaceCredits(uid: string) {
+  if (!hasHostedCredits()) return 0;
+  let ws = await getWorkspace(uid);
+  if (creditsLeft(ws) <= 0 && (await grantSignupCredits(uid))) ws = await getWorkspace(uid);
+  return creditsLeft(ws);
 }
 
 /** Resolve the model from the user's own subscription (OAuth), API key, or included credits. */
 export async function getModel(uid: string, settings: Settings, choice?: ModelChoice): Promise<ResolvedModel> {
-  const catalog = await getCatalog();
-  const picked = resolveChoice(settings, choice);
+  const [catalog, credits] = await Promise.all([getCatalog(), workspaceCredits(uid)]);
+  const picked = resolveChoice(settings, choice, credits);
   const provider = picked.provider;
   const mode = modeOf(settings, provider);
   let modelId = picked.model || recommendedModel(catalog, provider).id;
@@ -175,8 +186,8 @@ export async function getModel(uid: string, settings: Settings, choice?: ModelCh
 
   if (provider === "anthropic" && mode === "credits") {
     if (!hasHostedCredits()) throw new Error("Included credits aren't available on this server. Add an Anthropic API key in Settings.");
-    if (creditsLeft(await getWorkspace(uid)) <= 0)
-      throw new Error("Your included AI credits are used up. Connect Grok, ChatGPT or an API key in Settings to keep your loopers working.");
+    if (credits <= 0)
+      throw new Error("Your free Claude credits are used up. Connect your ChatGPT or Grok plan in Settings (or add an API key) to keep your loopers working.");
     return {
       model: createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(modelId),
       wrapTools: identity,
@@ -204,16 +215,19 @@ export async function getModel(uid: string, settings: Settings, choice?: ModelCh
 
 const priciest = (catalog: Catalog) => catalog.models.anthropic.reduce<ModelPrice>((a, m) => (m.price.output > a.output ? m.price : a), { input: 0, output: 0 });
 
-/** True when any provider has a usable sign-in, key or included credits. */
-export function hasCredentials(settings: Settings) {
-  return PROVIDERS.some((p) => usable(settings, p.id));
+/** True when the workspace runs on its own plan or key, not only on our included credits. */
+export const ownModelConnected = (settings: Settings) => PROVIDERS.some((p) => modeOf(settings, p.id) !== "credits" && usable(settings, p.id));
+
+/** True when any provider has a usable sign-in, key or included credits (left, when `credits` is given). */
+export function hasCredentials(settings: Settings, credits?: number) {
+  return PROVIDERS.some((p) => usable(settings, p.id, credits));
 }
 
 /** Every model the workspace can pick now, across its connected providers, with how each is paid for. */
 export async function availableModels(uid: string, settings: Settings): Promise<ModelOption[]> {
-  const [catalog, ws] = await Promise.all([getCatalog(), getWorkspace(uid)]);
+  const [catalog, credits] = await Promise.all([getCatalog(), workspaceCredits(uid)]);
   // Included-credit models only show while there are credits left to spend.
-  const shown = (p: Provider) => usable(settings, p) && (modeOf(settings, p) !== "credits" || creditsLeft(ws) > 0);
+  const shown = (p: Provider) => usable(settings, p, credits);
   const lists = await Promise.all(
     PROVIDERS.filter((p) => shown(p.id)).map(async ({ id: provider }) => {
       const payer = payerOf(modeOf(settings, provider));
@@ -254,8 +268,8 @@ async function chatgptError(res: Response) {
 
 /** The picker for one conversation: what can be picked, its pick, and what it runs on without one (the workspace default). */
 export async function modelMenu(uid: string, settings: Settings, picked?: ModelChoice): Promise<ModelMenu> {
-  const options = await availableModels(uid, settings);
-  const d = resolveChoice(settings);
+  const [options, credits] = await Promise.all([availableModels(uid, settings), workspaceCredits(uid)]);
+  const d = resolveChoice(settings, undefined, credits);
   const inProvider = options.filter((o) => o.provider === d.provider);
   const fallback = inProvider.find((o) => o.id === d.model) ?? inProvider.find((o) => o.recommended);
   return { options, picked, fallback };

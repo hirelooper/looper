@@ -19,6 +19,7 @@ const LEGACY_USERS = "users";
 export type Role = "owner" | "member";
 export type Plan = "personal" | "team";
 export type Interval = "month" | "year";
+export type CreditGrant = Plan | "signup";
 
 export interface Billing {
   plan: Plan;
@@ -40,10 +41,10 @@ export interface Workspace {
   ownerId: string;
   members: { userId: string; role: Role; joinedAt: string }[];
   billing?: Billing;
-  /** One-time AI credits in USD: granted with the first paid plan, spent by hosted model calls. */
+  /** One-time AI credits in USD: a small signup grant, then one per paid plan, spent by hosted model calls. */
   credits?: { granted: number; used: number };
-  /** Plans whose one-time credits were already given (so renewals and re-subscribing don't repeat them). */
-  creditGrants?: Plan[];
+  /** One-time credits already given, "signup" or a plan (so renewals and re-subscribing don't repeat them). */
+  creditGrants?: CreditGrant[];
   /** Machines and storage spent this month, in USD, against the monthly cap. */
   infra?: { month: string; usd: number };
   /** Free hosted access (the owner, friends, press). */
@@ -130,12 +131,61 @@ export function mutateWorkspace<T>(id: string, fn: (w: Workspace) => T | Promise
 
 /** Your personal workspace has your user id, so data from before teams stays in place. */
 async function ensurePersonal(user: User) {
-  if (await getWorkspace(user.id)) return;
+  const ws = await getWorkspace(user.id);
+  if (ws) {
+    // Accounts from before the signup grant get it on their next visit.
+    if (!ws.creditGrants?.includes("signup")) await grantSignupCredits(user.id);
+    return;
+  }
   await mutateWorkspace(user.id, (w) => {
     Object.assign(w, { name: "Personal", kind: "personal", ownerId: user.id });
     if (!w.members.some((m) => m.userId === user.id)) w.members.push({ userId: user.id, role: "owner", joinedAt: now() });
   });
   await addWorkspaceToUser(user.id, user.id);
+  await grantSignupCredits(user.id);
+}
+
+// — Signup credits: every account's personal workspace gets a few dollars of hosted Claude once,
+//   so the first runs work before anyone connects a plan. A global budget caps what we give away.
+
+const SIGNUP_BUDGET_KEY = "signup-credits";
+export const signupCreditsUsd = () => Number(process.env.SIGNUP_CREDITS_USD ?? 5);
+const signupBudgetUsd = () => Number(process.env.SIGNUP_CREDITS_BUDGET_USD ?? 1000);
+
+/** Give a personal workspace its one-time signup credits, while the budget lasts. True when granted now. */
+export async function grantSignupCredits(wsId: string): Promise<boolean> {
+  const usd = signupCreditsUsd();
+  if (!process.env.ANTHROPIC_API_KEY || !(usd > 0)) return false;
+  const ws = await getWorkspace(wsId);
+  if (!ws || ws.kind !== "personal" || ws.creditGrants?.includes("signup")) return false;
+  // Once the budget is spent, skip the lock below on every page load.
+  if (((await kv.get<{ usd: number }>(SIGNUP_BUDGET_KEY))?.usd ?? 0) + usd > signupBudgetUsd()) return false;
+  // Reserve from the budget first, then mark the workspace; give the reservation back if it was already marked.
+  const reserved = await kv.update<{ usd: number; count: number }, boolean>(SIGNUP_BUDGET_KEY, () => ({ usd: 0, count: 0 }), (b) => {
+    if (b.usd + usd > signupBudgetUsd()) return false;
+    b.usd += usd;
+    b.count += 1;
+    return true;
+  });
+  if (!reserved) return false;
+  const granted = await mutateWorkspace(wsId, (w) => {
+    if (w.creditGrants?.includes("signup")) return false;
+    w.creditGrants = [...(w.creditGrants ?? []), "signup"];
+    w.credits = { granted: (w.credits?.granted ?? 0) + usd, used: w.credits?.used ?? 0 };
+    return true;
+  });
+  if (!granted)
+    await kv.update<{ usd: number; count: number }, void>(SIGNUP_BUDGET_KEY, () => ({ usd: 0, count: 0 }), (b) => {
+      b.usd = Math.max(0, b.usd - usd);
+      b.count = Math.max(0, b.count - 1);
+    });
+  return granted;
+}
+
+/** What the signup grant has given away so far, against its budget (for /admin). */
+export async function signupBudget() {
+  const b = await kv.get<{ usd: number; count: number }>(SIGNUP_BUDGET_KEY);
+  return { usd: b?.usd ?? 0, count: b?.count ?? 0, budget: signupBudgetUsd(), each: signupCreditsUsd() };
 }
 
 async function addWorkspaceToUser(userId: string, wsId: string) {

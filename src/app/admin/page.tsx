@@ -13,7 +13,7 @@ export const metadata = { title: "Admin · Looper", robots: { index: false } };
 export default async function AdminPage() {
   await connection();
   const me = await requireAdmin();
-  const [{ rows, usage, pulse }, catalog] = await Promise.all([overview(me), getCatalog()]);
+  const [{ rows, usage, pulse, signup }, catalog] = await Promise.all([overview(me), getCatalog()]);
   const live = rows.filter((r) => !r.excluded);
   const canSend = hasNotes();
 
@@ -134,6 +134,9 @@ export default async function AdminPage() {
           ])}
           empty="Nothing spent on our side this month."
         />
+        <p className="mt-3 text-[0.8125rem] text-mute">
+          Signup credits: {money(signup.usd)} of {money(signup.budget)} given, {money(signup.each)} each to {signup.count} {signup.count === 1 ? "account" : "accounts"}.
+        </p>
         <h3 className="mb-3 mt-8 text-[1rem] font-semibold">
           By model <span className="font-normal text-faint">every workspace, by who pays</span>
         </h3>
