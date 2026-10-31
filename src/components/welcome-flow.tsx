@@ -23,6 +23,8 @@ export function WelcomeFlow(props: {
   profile?: BusinessProfile;
   workspace: { name: string; team: boolean; canRename: boolean };
   ready: boolean;
+  /** USD of free Claude credits the first runs will use, when no plan or key is connected */
+  freeCredits?: number;
   resume?: Hired;
   notice?: string;
   taken: string[];
@@ -266,6 +268,16 @@ export function WelcomeFlow(props: {
               <span>Loopers need a model to work. Sign in with your Grok or ChatGPT plan, or add an API key.</span>
               <Link href="/settings" className="shrink-0 font-medium text-ink hover:underline">
                 Open Settings →
+              </Link>
+            </div>
+          )}
+          {props.ready && props.freeCredits !== undefined && (
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-ink/[0.05] px-4 py-3 text-[0.875rem]">
+              <span>
+                {hired.name} starts on ${props.freeCredits.toFixed(2)} of Claude credits from us. Connect your ChatGPT or Grok plan so your loopers keep running after that.
+              </span>
+              <Link href="/settings" className="shrink-0 font-medium text-ink hover:underline">
+                Connect a plan →
               </Link>
             </div>
           )}

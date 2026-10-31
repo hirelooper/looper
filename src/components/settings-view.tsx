@@ -133,7 +133,7 @@ export function SettingsView({ settings, menu, usage, apps, notice }: { settings
 }
 
 const BILLED: Record<Payer, string> = {
-  us: "Included with your Looper plan",
+  us: "Credits from Looper, nothing billed to you",
   key: "Billed per token by the provider",
   plan: "Counts against your plan's limits",
 };

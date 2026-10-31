@@ -12,7 +12,7 @@ import { connectedAppFor, viaAppNote } from "./app-urls";
 import { computerSession, hasComputer, wipeComputer } from "./computer";
 import { coerce, columnSpec, databaseTools, deleteDatabase, describeDatabase, mutateDatabase, newDatabase, readDatabase } from "./database";
 import { connectTools, integrationsFor } from "./integrations";
-import { getModel, hasCredentials, type ResolvedModel } from "./llm";
+import { getModel, hasCredentials, workspaceCredits, type ResolvedModel } from "./llm";
 import { appUrl, notifyNeedsYou } from "./loops";
 import { describeTool, progressWriter } from "./progress";
 import { describeSchedule, isDue } from "./schedule";
@@ -747,8 +747,10 @@ export function defaultRetroSkill(): Skill {
  * own time budget, so a slow one can't eat the others' share of the 5-minute function limit.
  */
 export async function tickUser(uid: string) {
+  // No model to run on (no plan, key or credits left): start nothing rather than a run that fails.
+  const credits = await workspaceCredits(uid);
   const claimed = await mutate(uid, (db) => {
-    if (!hasCredentials(db.settings)) return [];
+    if (!hasCredentials(db.settings, credits)) return [];
     const at = now();
     return db.loopers
       .filter((l) => l.status === "active" && !db.runs.some((r) => r.looperId === l.id && r.status === "running"))
@@ -880,10 +882,10 @@ const templateSuggestions = () =>
 /** Onboarding: read the business's website and suggest the three metrics worth a looper first. */
 export async function profileBusiness(uid: string, url: string): Promise<BusinessProfile> {
   const start = normalizeUrl(url);
-  const [site, db] = await Promise.all([readSite(start.toString()).catch(() => null), read(uid)]);
+  const [site, db, credits] = await Promise.all([readSite(start.toString()).catch(() => null), read(uid), workspaceCredits(uid)]);
   const host = new URL(site?.url ?? start).hostname.replace(/^www\./, "");
   const fallback: BusinessProfile = { url: site?.url ?? start.toString(), name: site?.title.split(/\s[|–—-]\s|[|:]/)[0].trim() || host, summary: site?.description ?? "", customers: "", suggestions: templateSuggestions(), at: now() };
-  if (!site || !hasCredentials(db.settings)) return fallback;
+  if (!site || !hasCredentials(db.settings, credits)) return fallback;
   const templates = LOOPER_TEMPLATES.map((t) => `- ${t.slug}: ${t.title}, owns "${t.spec.metric.name}". ${t.pitch}`).join("\n");
   // A model hiccup shouldn't block onboarding: fall back to the ready-made loopers.
   const out = await callModel(

@@ -1,7 +1,7 @@
 import "server-only";
 import Stripe from "stripe";
 import { loopsContact, loopsEvent } from "./loops";
-import { getUser, getWorkspace, mutateWorkspace, type Interval, type Plan, type Workspace } from "./workspace";
+import { getUser, getWorkspace, mutateWorkspace, type CreditGrant, type Interval, type Plan, type Workspace } from "./workspace";
 
 // Hosted plans. Without STRIPE_SECRET_KEY (self-hosted) everything is open and nothing is metered.
 //   Personal $49/month or $294/year: unlimited loopers, $49 of AI credits once.
@@ -34,15 +34,19 @@ export function stripe() {
 const ACTIVE = new Set(["active", "trialing", "past_due"]);
 const compedEmails = () => (process.env.COMP_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 
+export const creditsLeft = (ws: Workspace | undefined) => Math.max(0, (ws?.credits?.granted ?? 0) - (ws?.credits?.used ?? 0));
+
+/** Never subscribed, living on the signup credits: the app stays open until they're spent. */
+export const onSignupTrial = (ws: Workspace | undefined) => !!ws && !ws.billing && !!ws.creditGrants?.includes("signup") && creditsLeft(ws) > 0;
+
 /** Can this workspace use the hosted app right now? */
 export function hasAccess(ws: Workspace | undefined, ownerEmail?: string) {
   if (!billingEnabled()) return true;
   if (!ws) return false;
   if (ws.comped || (ownerEmail && compedEmails().includes(ownerEmail.toLowerCase()))) return true;
+  if (onSignupTrial(ws)) return true;
   return !!ws.billing && ACTIVE.has(ws.billing.status);
 }
-
-export const creditsLeft = (ws: Workspace | undefined) => Math.max(0, (ws?.credits?.granted ?? 0) - (ws?.credits?.used ?? 0));
 
 const month = () => new Date().toISOString().slice(0, 7);
 export const infraSpent = (ws: Workspace | undefined) => (ws?.infra?.month === month() ? ws.infra.usd : 0);
@@ -139,7 +143,7 @@ export async function syncSubscription(sub: Stripe.Subscription) {
       periodEnd: periodEnd ? new Date(periodEnd * 1000).toISOString() : undefined,
       cancelAt: cancelAt && sub.status !== "canceled" ? new Date(cancelAt * 1000).toISOString() : undefined,
     };
-    const grants = new Set(w.creditGrants ?? []);
+    const grants = new Set<CreditGrant>(w.creditGrants ?? []);
     if (ACTIVE.has(sub.status) && !grants.has(plan)) {
       grants.add(plan);
       w.creditGrants = [...grants];

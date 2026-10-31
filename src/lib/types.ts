@@ -456,5 +456,8 @@ export function providerReady(s: PublicSettings, p: Provider) {
   return s.keysSet[p];
 }
 
+/** Runs on the workspace's own plan or key, not only on included credits. */
+export const ownModelReady = (s: PublicSettings) => PROVIDERS.some((p) => (s.authMode[p.id] ?? (s.subscriptions[p.id] ? "oauth" : "key")) !== "credits" && providerReady(s, p.id));
+
 /** Can loopers call any model with these settings. */
 export const modelReady = (s: PublicSettings) => PROVIDERS.some((p) => providerReady(s, p.id));

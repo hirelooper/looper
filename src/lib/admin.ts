@@ -6,7 +6,7 @@ import { appUrl } from "./loops";
 import { currentUser } from "./session";
 import type { DB, User } from "./types";
 import { summarize, thisMonth, isAdmin, type UsageRow } from "./usage";
-import { displayName, type Workspace } from "./workspace";
+import { displayName, signupBudget, type Workspace } from "./workspace";
 
 // The operators' view of every workspace: the onboarding funnel, what each one costs us, who is
 // most active and who needs a nudge. Built from what the app already stores, read in one pass
@@ -144,7 +144,8 @@ function build({ meta, db, usage, users, nudged, teamOnly }: Raw, now: number, s
   const plan = meta.billing && ACTIVE_BILLING.has(meta.billing.status) ? meta.billing.plan : undefined;
   const reached: Record<Step, boolean> = {
     signup: true,
-    plan: !billingEnabled() || !!meta.comped || !!meta.creditGrants?.length || hasAccess(meta, owner?.email),
+    // The signup credits open the app for a while; they don't count as choosing a plan.
+    plan: !billingEnabled() || !!meta.comped || !!meta.creditGrants?.some((g) => g !== "signup") || hasAccess({ ...meta, creditGrants: [] }, owner?.email),
     profile: !!db.profile,
     hire: loopers.length > 0,
     run: !!firstOk,
@@ -171,7 +172,7 @@ function build({ meta, db, usage, users, nudged, teamOnly }: Raw, now: number, s
       );
     const left = (meta.credits?.granted ?? 0) - (meta.credits?.used ?? 0);
     const perDay = spendUs7 / 7;
-    if (billingEnabled() && (meta.credits?.granted ?? 0) > 0 && perDay > 0 && left / perDay < 7)
+    if ((meta.credits?.granted ?? 0) > 0 && perDay > 0 && left / perDay < 7)
       add(
         "credits-low",
         new Date(now).toISOString(),
@@ -315,12 +316,13 @@ export async function overview(operator: User) {
   const now = Date.now();
   const month = thisMonth();
   const months = [month, prevMonth(month)];
-  const [metas, userList, dbs, usage, nudged] = await Promise.all([
+  const [metas, userList, dbs, usage, nudged, signup] = await Promise.all([
     kv.entries<Workspace>("team:"),
     kv.entries<User>("user:"),
     kv.entries<Partial<DB>>("ws:"),
     kv.entries<{ rows: Record<string, UsageRow> }>("usage:"),
     kv.entries<Record<string, string>>("admin:nudged:"),
+    signupBudget(),
   ]);
   const users = new Map(userList.map(([, u]) => [u.id, u]));
   const dbOf = new Map(dbs.map(([k, v]) => [idOf(k, "ws:"), v]));
@@ -348,6 +350,7 @@ export async function overview(operator: User) {
   return {
     rows,
     usage: summarize(allRows, month),
+    signup,
     pulse: {
       signups7: signups.filter((s) => since(s, now) < 7 * DAY).length,
       signups30: signups.filter((s) => since(s, now) < 30 * DAY).length,

@@ -58,8 +58,8 @@ export function Sidebar({
   workspace: WorkspaceRef & { plan?: string };
   workspaces: WorkspaceRef[];
   billing: boolean;
-  /** Included Claude credits in USD, when the workspace was granted any */
-  credits?: { left: number; granted: number };
+  /** Included Claude credits in USD, when the workspace was granted any; invite when no plan or key is connected */
+  credits?: { left: number; granted: number; invite: boolean };
   chiefPreview?: string;
   inboxCount: number;
   /** operators (ADMIN_EMAILS) get a link to /admin */
@@ -174,7 +174,7 @@ export function Sidebar({
         </nav>
 
         <div className="relative border-t border-ink/[0.06] p-2" ref={menuRef}>
-          {credits && <CreditsMeter {...credits} />}
+          {credits && <CreditsMeter {...credits} billing={billing} />}
           <button onClick={() => setMenu((m) => !m)} aria-label="Account and workspaces" aria-expanded={menu} className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left hover:bg-ink/[0.03]">
             <Avatar account={account} />
             <span className="min-w-0 flex-1">
@@ -247,11 +247,11 @@ function Avatar({ account }: { account: { email?: string; name?: string; avatar?
   );
 }
 
-/** Included Claude credits left, with a bar; once they run out, the way to keep going. */
-function CreditsMeter({ left, granted }: { left: number; granted: number }) {
+/** Included Claude credits left, with a bar, and the way to keep going: your own ChatGPT or Grok plan. */
+function CreditsMeter({ left, granted, invite, billing }: { left: number; granted: number; invite: boolean; billing: boolean }) {
   const out = left < 0.01;
   return (
-    <Link href={out ? "/settings" : "/billing"} className="mb-1 block rounded-[14px] px-2.5 py-2 hover:bg-ink/[0.03]" title={`$${left.toFixed(2)} of $${Math.round(granted)} in Claude credits left`}>
+    <Link href={out || invite || !billing ? "/settings" : "/billing"} className="mb-1 block rounded-[14px] px-2.5 py-2 hover:bg-ink/[0.03]" title={`$${left.toFixed(2)} of $${Math.round(granted)} in Claude credits left`}>
       <span className="flex items-baseline justify-between gap-2 text-[0.75rem]">
         <span className="text-mute">Claude credits</span>
         <span className={cx("tabular-nums", out ? "text-red" : "text-ink")}>{out ? "Used up" : `$${left.toFixed(2)} left`}</span>
@@ -259,7 +259,11 @@ function CreditsMeter({ left, granted }: { left: number; granted: number }) {
       <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-ink/[0.08]">
         <span className={cx("block h-full rounded-full", out ? "bg-red" : "bg-ink/60")} style={{ width: `${Math.min(100, (left / granted) * 100)}%` }} />
       </span>
-      {out && <span className="mt-1.5 block text-[0.75rem] text-mute">Connect ChatGPT, Grok or an API key to keep going</span>}
+      {invite && (
+        <span className="mt-1.5 block text-[0.75rem] text-mute">
+          {out ? "Connect your ChatGPT or Grok plan to keep going" : "On us for now. Connect your ChatGPT or Grok plan to keep loopers running after"}
+        </span>
+      )}
     </Link>
   );
 }
