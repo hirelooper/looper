@@ -60,7 +60,7 @@ export function ChatModelPicker({ target, menu, disabled }: { target: string; me
   if (!options.length)
     return (
       <Link href={CONNECT_HREF} className="mb-0.5 flex h-9 shrink-0 items-center rounded-full px-3 text-[0.8125rem] text-blue transition-colors hover:bg-ink/[0.05]">
-        Connect a subscription
+        Connect your own ChatGPT or Grok, use it free
       </Link>
     );
   // A pick whose provider is no longer connected runs on the default.
@@ -99,7 +99,7 @@ export function ChatModelPicker({ target, menu, disabled }: { target: string; me
         <ModelOptions options={options} />
         {needsPlan && (
           <optgroup label="More models">
-            <option value={CONNECT}>Connect a subscription…</option>
+            <option value={CONNECT}>Connect your own ChatGPT or Grok, use it free…</option>
           </optgroup>
         )}
       </select>
