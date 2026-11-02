@@ -1,6 +1,9 @@
 "use server";
 
+import { after } from "next/server";
 import { emailAllowed } from "@/lib/db";
+import { businessDomain } from "@/lib/email-domains";
+import { prefetchSite } from "@/lib/onboarding";
 import { checkCode, emailCode } from "@/lib/email-code";
 import { setSession, setWorkspace } from "@/lib/session";
 import { upsertUser } from "@/lib/workspace";
@@ -12,7 +15,11 @@ export async function sendEmailCode(email: string): Promise<{ error: string } | 
   const e = clean(email);
   if (!emailAllowed(e)) return { error: "This email isn't on the allowed list for this workspace." };
   const error = await emailCode(e);
-  return error ? { error } : null;
+  if (error) return { error };
+  // Read the company's website while they type the code, so onboarding opens on it.
+  const domain = businessDomain(e);
+  if (domain) after(() => prefetchSite(domain));
+  return null;
 }
 
 /** Sign in with the code from the email. Returns an error to show, or null. */

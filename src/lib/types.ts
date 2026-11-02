@@ -329,6 +329,14 @@ export interface MetricSuggestion {
   goal: string;
   /** a ready-made looper that fits, by slug */
   template?: string;
+  /** how the looper fills its table on day one, before any app is connected (onboarding) */
+  firstRows?: FirstRowsPlan;
+}
+
+/** A looper's first table and the web searches whose results fill it before any app is connected. */
+export interface FirstRowsPlan {
+  queries: string[];
+  table: { name: string; rowNoun: string; columns: { name: string; type: DbColumnType; options?: string[] }[] };
 }
 
 /** What Chief knows about the business, read from its website during onboarding. */
