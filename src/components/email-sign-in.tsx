@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { sendEmailCode, signInWithEmailCode } from "@/app/auth-actions";
+import { businessDomain, emailDomain } from "@/lib/email-domains";
 import { cx } from "./ui";
 
 /** Where to go after signing in: only paths on this site. */
@@ -86,15 +87,31 @@ export function EmailSignIn({ next }: { next?: string }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="email"
-          placeholder="you@company.com"
-          aria-label="Email"
+          placeholder="you@yourcompany.com"
+          aria-label="Work email"
           className="h-12 w-full rounded-full bg-ink/[0.05] px-5 text-[0.9375rem] outline-none placeholder:text-faint focus:bg-ink/[0.08]"
         />
+        <WorkEmailHint email={email} />
         <button type="submit" disabled={pending || !email} className={cx(button, "bg-ink text-page hover:bg-ink-2")}>
           {pending ? "Sending…" : "Email me a code"}
         </button>
       </form>
       {error && <p className="text-center text-[0.8125rem] text-red">{error}</p>}
     </div>
+  );
+}
+
+/** Suggests a work email: its domain tells Chief which website to read, so setup starts on its own. */
+function WorkEmailHint({ email }: { email: string }) {
+  const d = emailDomain(email);
+  const personal = /\.[a-z]{2,}$/.test(d) && !businessDomain(email);
+  return (
+    <p className="px-2 text-center text-[0.8125rem] leading-snug text-mute">
+      {personal
+        ? `${d} works too. With your work email, Chief finds your website and starts right away.`
+        : d && businessDomain(email)
+          ? `Chief will read ${d} while you check your inbox.`
+          : "Use your work email. Chief reads your company's website from it and starts on your first looper."}
+    </p>
   );
 }
