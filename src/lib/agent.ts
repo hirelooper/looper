@@ -19,11 +19,9 @@ import { describeSchedule, isDue } from "./schedule";
 import { usdOf } from "./models";
 import { recordUsage, type UsageRow } from "./usage";
 import { appFromName } from "./apps";
-import { LOOPER_TEMPLATES } from "./looper-templates";
-import { normalizeUrl, readSite } from "./site";
 import { webTools } from "./web";
 import { sealJson } from "./session";
-import type { AppRef, Ask, Attachment, BusinessProfile, Card, ChiefMessage, Column, DB, DbValue, Looper, ModelChoice, Retro, Run, RunStats, Settings, Skill, ToolCallLog } from "./types";
+import type { AppRef, Ask, Attachment, Card, ChiefMessage, Column, DB, DbValue, Looper, ModelChoice, Retro, Run, RunStats, Settings, Skill, ToolCallLog } from "./types";
 import { ACCENTS } from "./types";
 
 const now = () => new Date().toISOString();
@@ -95,7 +93,7 @@ const tokensOf = (u: LanguageModelUsage) => ({
  * path works for API keys. Integration tools stay out of the request until `find_tools` picks them,
  * so a hub with thousands of tools costs a handful of definitions per step.
  */
-async function callModel(uid: string, settings: Settings, opts: CallOptions, output?: Parameters<typeof streamText>[0]["output"]) {
+export async function callModel(uid: string, settings: Settings, opts: CallOptions, output?: Parameters<typeof streamText>[0]["output"]) {
   const m = await getModel(uid, settings, opts.model);
   try {
     return await callModelOnce(uid, m, opts, output, !!opts.fast);
@@ -859,59 +857,6 @@ function businessLine(db: DB) {
   return p ? `\nThe business: ${p.name} (${p.url}). ${p.summary}${p.customers ? ` Customers: ${p.customers}` : ""}` : "";
 }
 
-const profileSchema = z.object({
-  name: z.string().describe("the business or product name"),
-  summary: z.string().describe("2 short sentences: what it sells and how it makes money, in plain words"),
-  customers: z.string().describe("who buys, in one short line, e.g. 'Dutch freelancers and small agencies'"),
-  suggestions: z
-    .array(
-      z.object({
-        metric: z.string().describe("the metric, short, e.g. 'Organic signups per week'"),
-        why: z.string().describe("one short sentence on why this one, for this business"),
-        goal: z.string().describe("lowercase phrase that completes 'Hire a looper to …', e.g. 'grow organic signups from search to 100 a week'"),
-        template: z.enum(["none", ...LOOPER_TEMPLATES.map((t) => t.slug)]).describe("a ready-made looper that fits exactly, else 'none'"),
-      }),
-    )
-    .length(3),
-});
-
-/** Without a model (or a readable site) onboarding still offers the ready-made loopers. */
-const templateSuggestions = () =>
-  LOOPER_TEMPLATES.map((t) => ({ metric: t.spec.metric.name, why: t.pitch, goal: `${t.spec.metric.direction === "up" ? "grow" : "cut"} ${t.spec.metric.name.toLowerCase()}`, template: t.slug }));
-
-/** Onboarding: read the business's website and suggest the three metrics worth a looper first. */
-export async function profileBusiness(uid: string, url: string): Promise<BusinessProfile> {
-  const start = normalizeUrl(url);
-  const [site, db, credits] = await Promise.all([readSite(start.toString()).catch(() => null), read(uid), workspaceCredits(uid)]);
-  const host = new URL(site?.url ?? start).hostname.replace(/^www\./, "");
-  const fallback: BusinessProfile = { url: site?.url ?? start.toString(), name: site?.title.split(/\s[|–—-]\s|[|:]/)[0].trim() || host, summary: site?.description ?? "", customers: "", suggestions: templateSuggestions(), at: now() };
-  if (!site || !hasCredentials(db.settings, credits)) return fallback;
-  const templates = LOOPER_TEMPLATES.map((t) => `- ${t.slug}: ${t.title}, owns "${t.spec.metric.name}". ${t.pitch}`).join("\n");
-  // A model hiccup shouldn't block onboarding: fall back to the ready-made loopers.
-  const out = await callModel(
-    uid,
-    db.settings,
-    {
-      model: db.chatModels?.chief,
-      usage: { source: "chief", kind: "chat" },
-      instructions: `${CHIEF_INSTRUCTIONS}\n\nA new owner just gave you their website. Read it and say what the business is, then pick the three business metrics a looper should move first. Prefer numbers that bring revenue or customers and that a looper can move with everyday apps (Gmail, Search Console, social, CRM, docs). Make the three different from each other. Use a ready-made looper when one fits exactly:\n${templates}`,
-      prompt: `Website: ${site.url}\nTitle: ${site.title}\nDescription: ${site.description}\n\n${site.text}`,
-      maxSteps: 1,
-    },
-    Output.object({ schema: profileSchema }),
-  )
-    .then((r) => r.output as Promise<z.infer<typeof profileSchema>>)
-    .catch((e) => (console.error("[onboarding] profile", e), null));
-  if (!out) return fallback;
-  return {
-    ...fallback,
-    name: out.name || fallback.name,
-    summary: out.summary,
-    customers: out.customers,
-    suggestions: out.suggestions.map((s) => ({ metric: s.metric, why: s.why, goal: s.goal, ...(s.template !== "none" ? { template: s.template } : {}) })),
-  };
-}
-
 /** Chief drafts a looper for a goal without hiring it, so the owner can review it first. */
 export async function proposeLooper(uid: string, goal: string): Promise<LooperSpec> {
   const db = await read(uid);
@@ -1128,7 +1073,7 @@ async function appConnections(uid: string, db: DB) {
   return { isConnected, connected, hubs: hubs.map((h) => h.name), appsLine };
 }
 
-const CHIEF_INSTRUCTIONS = `You are Chief, the head of a team of loopers. A looper is an AI operator hired to move exactly one business metric. It has one kanban board, a calendar of scheduled skills, and a retro board where it judges its own effectiveness.
+export const CHIEF_INSTRUCTIONS = `You are Chief, the head of a team of loopers. A looper is an AI operator hired to move exactly one business metric. It has one kanban board, a calendar of scheduled skills, and a retro board where it judges its own effectiveness.
 
 Your job: turn the user's goals into loopers, manage them, and report on them. When the user wants something done repeatedly, propose a looper (name, one metric with unit/direction/target, 1–4 scheduled skills that name the apps to use) and hire it with create_looper — don't ask more than one clarifying question first. One metric per looper, always; split goals that have two metrics into two loopers.
 

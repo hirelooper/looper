@@ -7,6 +7,9 @@ import { hasEmailCodes } from "@/lib/email-code";
 import { isLocalServer } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 
+// Sending a code also starts reading the company website (see sendEmailCode).
+export const maxDuration = 60;
+
 const MESSAGES: Record<string, string> = {
   declined: "ChatGPT sign-in was cancelled.",
   error: "ChatGPT sign-in didn't complete. Try again.",
