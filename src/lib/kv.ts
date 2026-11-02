@@ -30,12 +30,18 @@ const databaseUrl = () => process.env.DATABASE_URL || process.env.POSTGRES_URL;
 /**
  * Supabase signs its certificates with its own CA, which Node doesn't trust, and pg treats
  * sslmode=require as "verify". Keep the connection encrypted but skip the CA check there.
+ * Elsewhere (Neon) pg already verifies the certificate for prefer/require/verify-ca and logs a
+ * SECURITY WARNING on every cold start; spelling it verify-full keeps that behavior, minus the warning.
  */
 function pgConfig(url: string) {
   const u = new URL(url);
-  if (!/\.supabase\.(com|co)$/.test(u.hostname)) return { connectionString: url };
-  u.searchParams.delete("sslmode");
-  return { connectionString: u.toString(), ssl: { rejectUnauthorized: false } };
+  if (/\.supabase\.(com|co)$/.test(u.hostname)) {
+    u.searchParams.delete("sslmode");
+    return { connectionString: u.toString(), ssl: { rejectUnauthorized: false } };
+  }
+  const mode = u.searchParams.get("sslmode");
+  if (mode && ["prefer", "require", "verify-ca"].includes(mode) && !u.searchParams.has("uselibpqcompat")) u.searchParams.set("sslmode", "verify-full");
+  return { connectionString: u.toString() };
 }
 
 function pool() {
