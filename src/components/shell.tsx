@@ -11,13 +11,21 @@ import { isAdmin } from "@/lib/usage";
 import { getWorkspace, workspacesOf } from "@/lib/workspace";
 import { Notices } from "./activity";
 import { CommandPalette } from "./command-palette";
+import { CrispChat } from "./crisp-chat";
 import { Sidebar } from "./sidebar";
 import { fmt } from "./ui";
 
 /** Signed-in frame: the looper rail on the left, the page on the right. Signed out: just the page. */
 export async function Shell({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
-  if (!user) return <main className="min-h-dvh">{children}</main>;
+  const crispId = "430b1519-2896-4e80-bc81-bbad92f0c968"; // hirelooper.com Crisp workspace
+  if (!user)
+    return (
+      <>
+        <main className="min-h-dvh">{children}</main>
+        <CrispChat websiteId={crispId} />
+      </>
+    );
   const all = await workspacesOf(user);
   const ws = all.find((w) => w.id === user.ws) ?? (await getWorkspace(user.ws));
   const db = await read(user.ws);
@@ -63,6 +71,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       <main className="min-w-0 flex-1 lg:h-dvh lg:overflow-y-auto">{children}</main>
       <CommandPalette loopers={loopers.map(({ id, name, color, skills }) => ({ id, name, color, skills }))} />
       <Notices loopers={loopers.map(({ id, color }) => ({ id, color }))} />
+      <CrispChat websiteId={crispId} user={{ email: user.email, name: user.name, avatar: user.avatar, workspace: ws?.name }} />
     </div>
   );
 }
