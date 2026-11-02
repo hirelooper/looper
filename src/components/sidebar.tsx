@@ -39,6 +39,9 @@ function InboxIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+/** Where the workspace stands on billing (hosted only). */
+export type PlanState = { kind: "free" } | { kind: "comped" } | { kind: "paid"; name: string; pastDue: boolean; cancelAt?: string };
+
 /** Left rail: the inbox, Chief, then every looper with its number. */
 type WorkspaceRef = { id: string; name: string; kind: "personal" | "team" };
 
@@ -51,6 +54,8 @@ export function Sidebar({
   credits,
   chiefPreview,
   inboxCount,
+  plan,
+  isOwner,
   admin,
 }: {
   loopers: SidebarLooper[];
@@ -62,6 +67,9 @@ export function Sidebar({
   credits?: { left: number; granted: number; invite: boolean };
   chiefPreview?: string;
   inboxCount: number;
+  /** Billing state; undefined when self-hosted */
+  plan?: PlanState;
+  isOwner?: boolean;
   /** operators (ADMIN_EMAILS) get a link to /admin */
   admin?: boolean;
 }) {
@@ -97,6 +105,17 @@ export function Sidebar({
         <button onClick={openPalette} className="ml-auto shrink-0 rounded-full bg-ink/[0.05] px-3 py-1.5 text-[0.8125rem]">
           Search
         </button>
+        {plan && (
+          <Link
+            href="/billing"
+            className={cx(
+              "shrink-0 rounded-full px-3 py-1.5 text-[0.8125rem] font-medium",
+              plan.kind === "free" ? "bg-ink text-page" : plan.kind === "paid" && plan.pastDue ? "bg-red/10 text-red" : "bg-ink/[0.05]",
+            )}
+          >
+            {plan.kind === "free" ? "Upgrade" : plan.kind === "paid" && plan.pastDue ? "Fix payment" : "Plan"}
+          </Link>
+        )}
       </div>
 
       <aside className="hidden h-dvh w-[300px] shrink-0 flex-col border-r border-ink/[0.06] bg-rail lg:flex">
@@ -174,12 +193,15 @@ export function Sidebar({
         </nav>
 
         <div className="relative border-t border-ink/[0.06] p-2" ref={menuRef}>
-          {credits && <CreditsMeter {...credits} billing={billing} />}
+          {plan && <PlanCard plan={plan} isOwner={!!isOwner} credits={credits} team={workspace.kind === "team"} />}
+          {credits && !plan && <CreditsMeter {...credits} />}
           <button onClick={() => setMenu((m) => !m)} aria-label="Account and workspaces" aria-expanded={menu} className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left hover:bg-ink/[0.03]">
             <Avatar account={account} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[0.875rem] font-medium">{workspace.kind === "team" ? workspace.name : account.name || account.email || "Signed in"}</span>
-              <span className="block truncate text-[0.75rem] text-mute">{workspace.kind === "team" ? `Team${workspace.plan ? ` · ${workspace.plan}` : ""}` : workspace.plan ?? account.email}</span>
+              <span className="block truncate text-[0.75rem] text-mute">
+                {workspace.kind === "team" ? `Team${workspace.plan ? ` · ${workspace.plan}` : ""}` : (workspace.plan ?? account.email)}
+              </span>
             </span>
             <span className="text-mute">⋯</span>
           </button>
@@ -209,7 +231,7 @@ export function Sidebar({
               <div className="my-1 h-px bg-line" />
               {[
                 [workspace.kind === "team" ? "Members & invites" : "Workspace", "/workspace"],
-                ...(billing ? [["Plan & credits", "/billing"]] : []),
+                ...(billing ? [[plan?.kind === "free" ? "Upgrade plan" : plan?.kind === "paid" ? "Manage subscription" : "Plan & credits", "/billing"]] : []),
                 ["Settings", "/settings"],
                 ...(admin ? [["Admin", "/admin"]] : []),
               ].map(([label, href]) => (
@@ -247,11 +269,27 @@ function Avatar({ account }: { account: { email?: string; name?: string; avatar?
   );
 }
 
-/** Included Claude credits left, with a bar, and the way to keep going: your own ChatGPT or Grok plan. */
-function CreditsMeter({ left, granted, invite, billing }: { left: number; granted: number; invite: boolean; billing: boolean }) {
+type Credits = { left: number; granted: number; invite: boolean };
+
+/** Included Claude credits left, with a bar. Self-hosted: links to Settings to connect your own model. */
+function CreditsMeter({ left, granted, invite }: Credits) {
   const out = left < 0.01;
   return (
-    <Link href={out || invite || !billing ? "/settings" : "/billing"} className="mb-1 block rounded-[14px] px-2.5 py-2 hover:bg-ink/[0.03]" title={`$${left.toFixed(2)} of $${Math.round(granted)} in Claude credits left`}>
+    <Link href="/settings" className="mb-1 block rounded-[14px] px-2.5 py-2 hover:bg-ink/[0.03]" title={`$${left.toFixed(2)} of $${Math.round(granted)} in Claude credits left`}>
+      <CreditsBar left={left} granted={granted} />
+      {invite && (
+        <span className="mt-1.5 block text-[0.75rem] text-mute">
+          {out ? "Connect your ChatGPT or Grok plan to keep going" : "On us for now. Connect your ChatGPT or Grok plan to keep loopers running after"}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function CreditsBar({ left, granted }: { left: number; granted: number }) {
+  const out = left < 0.01;
+  return (
+    <>
       <span className="flex items-baseline justify-between gap-2 text-[0.75rem]">
         <span className="text-mute">Claude credits</span>
         <span className={cx("tabular-nums", out ? "text-red" : "text-ink")}>{out ? "Used up" : `$${left.toFixed(2)} left`}</span>
@@ -259,9 +297,59 @@ function CreditsMeter({ left, granted, invite, billing }: { left: number; grante
       <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-ink/[0.08]">
         <span className={cx("block h-full rounded-full", out ? "bg-red" : "bg-ink/60")} style={{ width: `${Math.min(100, (left / granted) * 100)}%` }} />
       </span>
-      {invite && (
-        <span className="mt-1.5 block text-[0.75rem] text-mute">
-          {out ? "Connect your ChatGPT or Grok plan to keep going" : "On us for now. Connect your ChatGPT or Grok plan to keep loopers running after"}
+    </>
+  );
+}
+
+const shortDay = (iso: string) => new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
+
+/** Hosted: the plan you're on, credits left, and one obvious button: Upgrade on Free, Manage once subscribed. */
+function PlanCard({ plan, isOwner, credits, team }: { plan: PlanState; isOwner: boolean; credits?: Credits; team: boolean }) {
+  const out = !!credits && credits.left < 0.01;
+  const offer = team ? "$99 of Claude every month with Team" : "$19 of Claude every month with Individual";
+  if (plan.kind === "free")
+    return (
+      <div className="mb-1 rounded-[14px] bg-ink/[0.04] p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[0.8125rem] font-medium">Free plan</span>
+          <Link href="/billing" className="rounded-full bg-ink px-3 py-1 text-[0.75rem] font-medium text-page hover:bg-ink-2">
+            Upgrade
+          </Link>
+        </div>
+        {credits && (
+          <div className="mt-2">
+            <CreditsBar left={credits.left} granted={credits.granted} />
+          </div>
+        )}
+        <p className="mt-1.5 text-[0.75rem] leading-snug text-mute">
+          {credits?.invite ? (
+            <>
+              {out ? "Starter credits are used up. " : ""}Get {offer}, or{" "}
+              <Link href="/settings" className="underline hover:text-ink">
+                connect your ChatGPT or Grok
+              </Link>{" "}
+              for free.
+            </>
+          ) : (
+            `AI runs on your own plan. Upgrade to get ${offer}.`
+          )}
+        </p>
+      </div>
+    );
+  const label = plan.kind === "paid" ? `${plan.name} plan` : "Complimentary";
+  const note = plan.kind === "paid" ? (plan.pastDue ? "Payment failed" : plan.cancelAt ? `Ends ${shortDay(plan.cancelAt)}` : "") : "";
+  return (
+    <Link href="/billing" className="mb-1 block rounded-[14px] px-2.5 py-2 hover:bg-ink/[0.03]">
+      <span className="flex items-center justify-between gap-2 text-[0.75rem]">
+        <span className="font-medium text-ink">
+          {label}
+          {note && <span className={cx("ml-1.5 font-normal", plan.kind === "paid" && plan.pastDue ? "text-red" : "text-mute")}>· {note}</span>}
+        </span>
+        {plan.kind === "paid" && isOwner && <span className={cx(plan.pastDue ? "text-red" : "text-mute")}>{plan.pastDue ? "Fix" : "Manage"} →</span>}
+      </span>
+      {credits && (
+        <span className="mt-1.5 block">
+          <CreditsBar left={credits.left} granted={credits.granted} />
         </span>
       )}
     </Link>

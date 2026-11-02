@@ -41,8 +41,15 @@ export interface Workspace {
   ownerId: string;
   members: { userId: string; role: Role; joinedAt: string }[];
   billing?: Billing;
-  /** One-time AI credits in USD: a small signup grant, then one per paid plan, spent by hosted model calls. */
-  credits?: { granted: number; used: number };
+  /** Claude credits in USD, spent by hosted model calls: a small one-time signup grant, then the paid plan's monthly credits. */
+  credits?: {
+    granted: number;
+    used: number;
+    /** Paid plan these credits came from; unset for signup credits */
+    plan?: Plan;
+    /** Billing period (its end) the plan credits belong to; a new period resets them */
+    period?: string;
+  };
   /** One-time credits already given, "signup" or a plan (so renewals and re-subscribing don't repeat them). */
   creditGrants?: CreditGrant[];
   /** Machines and storage spent this month, in USD, against the monthly cap. */

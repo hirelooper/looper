@@ -19,14 +19,14 @@ const MESSAGES: Record<string, string> = {
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   await connection();
-  const { chatgpt, next, plan, interval, template } = await searchParams;
+  const { chatgpt, next, plan, template } = await searchParams;
   // After sign-in: where you were going (an invite), else choosing the plan you clicked on the site.
   const tpl = typeof template === "string" ? encodeURIComponent(template) : undefined;
   const target =
     typeof next === "string" && next.startsWith("/") && !next.startsWith("//")
       ? next
       : plan === "personal" || plan === "team"
-        ? `/billing?plan=${plan}${interval === "year" ? "&interval=year" : ""}${tpl ? `&template=${tpl}` : ""}`
+        ? `/billing?plan=${plan}${tpl ? `&template=${tpl}` : ""}`
         : tpl
           ? `/hire?template=${tpl}`
           : "/";

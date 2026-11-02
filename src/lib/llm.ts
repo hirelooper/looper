@@ -187,7 +187,7 @@ export async function getModel(uid: string, settings: Settings, choice?: ModelCh
   if (provider === "anthropic" && mode === "credits") {
     if (!hasHostedCredits()) throw new Error("Included credits aren't available on this server. Add an Anthropic API key in Settings.");
     if (credits <= 0)
-      throw new Error("Your free Claude credits are used up. Connect your ChatGPT or Grok plan in Settings (or add an API key) to keep your loopers working.");
+      throw new Error("Your Claude credits are used up. Connect your ChatGPT or Grok plan or an API key in Settings, or upgrade to Individual ($19/month) for Claude credits every month.");
     return {
       model: createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(modelId),
       wrapTools: identity,

@@ -4,14 +4,18 @@ import { loopsContact, loopsEvent } from "./loops";
 import { getUser, getWorkspace, mutateWorkspace, type CreditGrant, type Interval, type Plan, type Workspace } from "./workspace";
 
 // Hosted plans. Without STRIPE_SECRET_KEY (self-hosted) everything is open and nothing is metered.
-//   Personal $49/month or $294/year: unlimited loopers, $49 of AI credits once.
-//   Team $199/month or $1,194/year: unlimited collaborators and loopers, $199 of AI credits once.
-// Yearly is half the monthly price. Each workspace may spend up to $5 a month on computers and storage.
+//   Free $0: unlimited loopers; AI runs on your own ChatGPT or Grok plan, or an API key.
+//   Individual $19/month: everything in Free plus $19 of Claude credits every month.
+//   Team $99/month: everything in Individual plus $99 of Claude credits a month and unlimited collaborators.
+// Plan credits reset each billing period and don't roll over. Each workspace may spend up to $5 a month on computers and storage.
+// Billed monthly; older yearly subscriptions keep working and are managed in the Stripe portal.
 
-export const PLANS: Record<Plan, { name: string; usd: Record<Interval, number>; credits: number; blurb: string }> = {
-  personal: { name: "Personal", usd: { month: 49, year: 294 }, credits: 49, blurb: "Unlimited loopers, just you" },
-  team: { name: "Team", usd: { month: 199, year: 1194 }, credits: 199, blurb: "Unlimited collaborators and loopers" },
+export const PLANS: Record<Plan, { name: string; usd: number; credits: number; who: string; lines: string[] }> = {
+  personal: { name: "Individual", usd: 19, credits: 19, who: "For you, with Claude included", lines: ["Everything in Free", "$19 of Claude credits every month", "Your own plan or key works alongside"] },
+  team: { name: "Team", usd: 99, credits: 99, who: "For teams who work with loopers together", lines: ["Everything in Individual", "$99 of Claude credits every month", "Unlimited collaborators, invite links"] },
 };
+
+export const FREE_PLAN = { name: "Free", usd: 0, who: "Bring your own subscription", lines: ["Unlimited loopers", "Kanban, calendar, approvals, weekly retro", "AI runs on your ChatGPT or Grok, or your API key"] };
 
 // Each Stripe price is found by its lookup key; an env var with the price id overrides it.
 const PRICE_ENV: Record<Plan, Record<Interval, string>> = {
@@ -36,16 +40,15 @@ const compedEmails = () => (process.env.COMP_EMAILS ?? "").split(",").map((s) =>
 
 export const creditsLeft = (ws: Workspace | undefined) => Math.max(0, (ws?.credits?.granted ?? 0) - (ws?.credits?.used ?? 0));
 
-/** Never subscribed, living on the signup credits: the app stays open until they're spent. */
-export const onSignupTrial = (ws: Workspace | undefined) => !!ws && !ws.billing && !!ws.creditGrants?.includes("signup") && creditsLeft(ws) > 0;
+/** On a paid plan right now (active, trialing or past due). */
+export const onPaidPlan = (ws: Workspace | undefined) => !!ws?.billing && ACTIVE.has(ws.billing.status);
 
-/** Can this workspace use the hosted app right now? */
-export function hasAccess(ws: Workspace | undefined, ownerEmail?: string) {
-  if (!billingEnabled()) return true;
-  if (!ws) return false;
-  if (ws.comped || (ownerEmail && compedEmails().includes(ownerEmail.toLowerCase()))) return true;
-  if (onSignupTrial(ws)) return true;
-  return !!ws.billing && ACTIVE.has(ws.billing.status);
+/** Free hosted access: flagged on the workspace, or the owner is in COMP_EMAILS. */
+export const isComped = (ws: Workspace | undefined, ownerEmail?: string) => !!ws?.comped || (!!ownerEmail && compedEmails().includes(ownerEmail.toLowerCase()));
+
+/** Can this workspace use the hosted app? Always: without a paid plan it's on Free and AI runs on your own plan or key. */
+export function hasAccess(ws: Workspace | undefined) {
+  return !billingEnabled() || !!ws;
 }
 
 const month = () => new Date().toISOString().slice(0, 7);
@@ -121,7 +124,23 @@ export async function portalUrl(ws: Workspace, origin: string) {
   return s.url;
 }
 
-/** Keep the workspace's plan in step with its Stripe subscription; grant each plan's credits once. */
+/**
+ * Credits for a billing period: each new period resets to the plan's monthly credits (no rollover).
+ * Moving to a bigger plan mid-period tops up the difference. Leftover signup credits carry into the first period.
+ */
+function refillCredits(w: Workspace, plan: Plan, period: string) {
+  const c = w.credits;
+  const monthly = PLANS[plan].credits;
+  if (c?.period === period && c.plan === plan) return;
+  if (c?.period === period && c.plan) {
+    w.credits = { ...c, plan, granted: c.granted + Math.max(0, monthly - PLANS[c.plan].credits) };
+    return;
+  }
+  const carry = c && !c.plan ? Math.max(0, c.granted - c.used) : 0;
+  w.credits = { granted: monthly + carry, used: 0, plan, period };
+}
+
+/** Keep the workspace's plan in step with its Stripe subscription, and its credits in step with the billing period. */
 export async function syncSubscription(sub: Stripe.Subscription) {
   const wsId = sub.metadata?.workspaceId;
   if (!wsId) return;
@@ -143,11 +162,14 @@ export async function syncSubscription(sub: Stripe.Subscription) {
       periodEnd: periodEnd ? new Date(periodEnd * 1000).toISOString() : undefined,
       cancelAt: cancelAt && sub.status !== "canceled" ? new Date(cancelAt * 1000).toISOString() : undefined,
     };
-    const grants = new Set<CreditGrant>(w.creditGrants ?? []);
-    if (ACTIVE.has(sub.status) && !grants.has(plan)) {
+    if (ACTIVE.has(sub.status)) {
+      const grants = new Set<CreditGrant>(w.creditGrants ?? []);
       grants.add(plan);
       w.creditGrants = [...grants];
-      w.credits = { granted: (w.credits?.granted ?? 0) + PLANS[plan].credits, used: w.credits?.used ?? 0 };
+      refillCredits(w, plan, w.billing.periodEnd ?? new Date().toISOString().slice(0, 7));
+    } else if (sub.status === "canceled" && w.credits?.plan) {
+      // Back on Free: plan credits end with the period that was paid for.
+      w.credits = { granted: w.credits.used, used: w.credits.used };
     }
     return { ...w };
   });

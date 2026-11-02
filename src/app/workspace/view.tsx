@@ -30,7 +30,7 @@ export function WorkspaceView(props: { me: string; workspace: { id: string; name
   const create = (
     <section className="tile p-6">
       <div className="text-[1.125rem] font-semibold">New team workspace</div>
-      <p className="mt-1 text-[0.875rem] text-mute">A shared space: everyone you invite sees and works with the same loopers, boards, chats and approvals.{props.billing ? " Teams are on the Team plan ($199/month, $199 of AI credits included once)." : ""}</p>
+      <p className="mt-1 text-[0.875rem] text-mute">A shared space: everyone you invite sees and works with the same loopers, boards, chats and approvals.{props.billing ? " Teams are on the Team plan: $99/month with $99 of Claude credits every month." : ""}</p>
       <form
         className="mt-4 flex flex-wrap gap-2"
         onSubmit={(e) => {

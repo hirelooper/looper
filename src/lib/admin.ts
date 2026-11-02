@@ -144,8 +144,8 @@ function build({ meta, db, usage, users, nudged, teamOnly }: Raw, now: number, s
   const plan = meta.billing && ACTIVE_BILLING.has(meta.billing.status) ? meta.billing.plan : undefined;
   const reached: Record<Step, boolean> = {
     signup: true,
-    // The signup credits open the app for a while; they don't count as choosing a plan.
-    plan: !billingEnabled() || !!meta.comped || !!meta.creditGrants?.some((g) => g !== "signup") || hasAccess({ ...meta, creditGrants: [] }, owner?.email),
+    // Free counts: everyone starts on a plan.
+    plan: hasAccess(meta),
     profile: !!db.profile,
     hire: loopers.length > 0,
     run: !!firstOk,
@@ -159,7 +159,7 @@ function build({ meta, db, usage, users, nudged, teamOnly }: Raw, now: number, s
   const add = (reason: Reason, at: string | undefined, subject: string, body: string) => nudges.push({ reason, since: at, subject, body: `Hi ${first},\n\n${body}${sign}` });
 
   if (!excluded) {
-    const access = hasAccess(meta, owner?.email);
+    const access = hasAccess(meta);
     if (meta.billing?.status === "past_due")
       add("past-due", undefined, "Your Looper payment didn't go through", `The last payment for ${meta.kind === "team" ? meta.name : "your workspace"} didn't go through, and your loopers stop when the retries run out. Update your card here: ${url}/billing`);
     const oldAsk = asks.filter((a) => since(a.createdAt, now) > 2 * DAY).map((a) => a.createdAt).sort()[0];
@@ -177,7 +177,7 @@ function build({ meta, db, usage, users, nudged, teamOnly }: Raw, now: number, s
         "credits-low",
         new Date(now).toISOString(),
         "Your included AI credits are almost used",
-        `Your workspace has ${usd(Math.max(0, left))} of included Claude credits left, about ${Math.max(0, Math.floor(left / perDay))} days at this week's pace. To keep your loopers running after that, add your own API key or connect a ChatGPT or Grok plan in Settings: ${url}/settings`,
+        `Your workspace has ${usd(Math.max(0, left))} of included Claude credits left, about ${Math.max(0, Math.floor(left / perDay))} days at this week's pace. To keep your loopers running after that, connect a ChatGPT or Grok plan or an API key in Settings (${url}/settings), or ${meta.billing ? "move to a bigger plan" : "upgrade to Individual for $19 of Claude credits every month"}: ${url}/billing`,
       );
     const finished = recent.filter((r) => r.status !== "running");
     const lastThree = finished.slice(-3);
@@ -239,11 +239,11 @@ function build({ meta, db, usage, users, nudged, teamOnly }: Raw, now: number, s
     members: meta.members.length,
     createdAt: signup,
     lastSeen,
-    plan: meta.billing ? `${PLANS[meta.billing.plan]?.name}${meta.billing.interval === "year" ? " yearly" : ""}` : undefined,
+    plan: meta.billing ? `${PLANS[meta.billing.plan]?.name}${meta.billing.interval === "year" ? " yearly (legacy)" : ""}` : undefined,
     status: meta.billing?.status,
     comped: !!meta.comped,
-    // Yearly plans count as a twelfth of their price each month.
-    mrr: plan && meta.billing?.status === "active" && !meta.comped ? (meta.billing.interval === "year" ? PLANS[plan].usd.year / 12 : PLANS[plan].usd.month) : 0,
+    // At today's monthly price; legacy yearly and older-priced subscriptions are counted the same.
+    mrr: plan && meta.billing?.status === "active" && !meta.comped ? PLANS[plan].usd : 0,
     reached,
     at: { signup, profile: db.profile?.at, hire, run: firstOk },
     site: db.profile?.url,
