@@ -23,7 +23,7 @@ export type CreditGrant = Plan | "signup";
 
 export interface Billing {
   plan: Plan;
-  /** Billed monthly or yearly; older records without it are monthly. */
+  /** Plans are monthly; kept for older records. */
   interval?: Interval;
   /** Stripe subscription status: active, trialing, past_due, canceled, … */
   status: string;
@@ -41,9 +41,13 @@ export interface Workspace {
   ownerId: string;
   members: { userId: string; role: Role; joinedAt: string }[];
   billing?: Billing;
-  /** One-time AI credits in USD: a small signup grant, then one per paid plan, spent by hosted model calls. */
-  credits?: { granted: number; used: number };
-  /** One-time credits already given, "signup" or a plan (so renewals and re-subscribing don't repeat them). */
+  /**
+   * AI credits, spent by hosted model calls (1 credit = $1 at our marked-up prices). A one-time signup
+   * grant, then each paid billing month's allowance: `period` is that month's start, and it resets
+   * when the next one begins.
+   */
+  credits?: { granted: number; used: number; period?: string; plan?: Plan };
+  /** Credits ever given, "signup" or a plan (signup is given once). */
   creditGrants?: CreditGrant[];
   /** Machines and storage spent this month, in USD, against the monthly cap. */
   infra?: { month: string; usd: number };
@@ -149,6 +153,7 @@ async function ensurePersonal(user: User) {
 //   so the first runs work before anyone connects a plan. A global budget caps what we give away.
 
 const SIGNUP_BUDGET_KEY = "signup-credits";
+/** Signup credits, in credits (not USD of our cost): 5 credits is $2.50 of Claude at list price. */
 export const signupCreditsUsd = () => Number(process.env.SIGNUP_CREDITS_USD ?? 5);
 const signupBudgetUsd = () => Number(process.env.SIGNUP_CREDITS_BUDGET_USD ?? 1000);
 
@@ -171,7 +176,7 @@ export async function grantSignupCredits(wsId: string): Promise<boolean> {
   const granted = await mutateWorkspace(wsId, (w) => {
     if (w.creditGrants?.includes("signup")) return false;
     w.creditGrants = [...(w.creditGrants ?? []), "signup"];
-    w.credits = { granted: (w.credits?.granted ?? 0) + usd, used: w.credits?.used ?? 0 };
+    w.credits = { ...w.credits, granted: (w.credits?.granted ?? 0) + usd, used: w.credits?.used ?? 0 };
     return true;
   });
   if (!granted)

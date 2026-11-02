@@ -4,19 +4,15 @@ import { read } from "@/lib/db";
 import { inboxItems, metricDelta, metricNow, trend } from "@/lib/inbox";
 import { isDue } from "@/lib/schedule";
 import { areaOf } from "@/lib/types";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { billingEnabled, creditsLeft, hasAccess } from "@/lib/billing";
+import { billingEnabled, creditsLeft } from "@/lib/billing";
 import { hasHostedCredits, ownModelConnected } from "@/lib/llm";
 import { currentUser } from "@/lib/session";
 import { isAdmin } from "@/lib/usage";
-import { getUser, getWorkspace, workspacesOf } from "@/lib/workspace";
+import { getWorkspace, workspacesOf } from "@/lib/workspace";
 import { Notices } from "./activity";
 import { CommandPalette } from "./command-palette";
 import { Sidebar } from "./sidebar";
 import { fmt } from "./ui";
-
-const OPEN_WITHOUT_PLAN = ["/billing", "/invite/", "/workspace", "/login", "/auth/"];
 
 /** Signed-in frame: the looper rail on the left, the page on the right. Signed out: just the page. */
 export async function Shell({ children }: { children: React.ReactNode }) {
@@ -24,13 +20,6 @@ export async function Shell({ children }: { children: React.ReactNode }) {
   if (!user) return <main className="min-h-dvh">{children}</main>;
   const all = await workspacesOf(user);
   const ws = all.find((w) => w.id === user.ws) ?? (await getWorkspace(user.ws));
-  const owner = ws && ws.ownerId !== user.id ? await getUser(ws.ownerId) : user;
-  // Hosted without a plan: only choosing one (and joining or switching workspaces) is open.
-  if (!hasAccess(ws, owner?.email)) {
-    const path = (await headers()).get("x-pathname") ?? "/";
-    if (!OPEN_WITHOUT_PLAN.some((p) => path.startsWith(p))) redirect("/billing");
-    return <main className="min-h-dvh">{children}</main>;
-  }
   const db = await read(user.ws);
   // Hosted, the cron only fires daily, so opening the app starts anything that came due since.
   const due = db.loopers.some((l) => l.status === "active" && l.skills.some((s) => isDue(s)) && !db.runs.some((r) => r.looperId === l.id && r.status === "running"));
@@ -54,7 +43,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       skills: l.skills.map((s) => ({ id: s.id, name: s.name })),
     };
   });
-  // Included Claude credits (signup, then once per plan); show what's left, and invite a plan until one is connected.
+  // Included Claude credits (signup, then each paid month); show what's left, and invite a plan until one is connected.
   const granted = ws?.credits?.granted ?? 0;
   const credits = hasHostedCredits() && granted > 0 ? { left: creditsLeft(ws), granted, invite: !ownModelConnected(db.settings) } : undefined;
   const lastChief = db.chief.filter((m) => m.role === "assistant").at(-1)?.content.replace(/\s+/g, " ").slice(0, 120);
@@ -65,7 +54,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
         chiefPreview={lastChief}
         inboxCount={inbox.length}
         account={{ email: user.email, name: user.name, avatar: user.avatar }}
-        workspace={{ id: user.ws, name: ws?.name ?? "Personal", kind: ws?.kind ?? "personal", plan: ws?.billing ? (ws.billing.plan === "team" ? "Team plan" : "Personal plan") : ws?.comped ? "Complimentary" : undefined }}
+        workspace={{ id: user.ws, name: ws?.name ?? "Personal", kind: ws?.kind ?? "personal", plan: ws?.billing && ws.billing.status !== "canceled" ? (ws.billing.plan === "team" ? "Team plan" : "Individual plan") : ws?.comped ? "Complimentary" : billingEnabled() ? "Free plan" : undefined }}
         workspaces={all.map((w) => ({ id: w.id, name: w.name, kind: w.kind }))}
         billing={billingEnabled()}
         credits={credits}

@@ -155,7 +155,7 @@ function ProviderCard({ id, settings }: { id: Provider; settings: PublicSettings
   const payer: Payer = mode === "credits" ? "us" : mode === "oauth" ? "plan" : "key";
   const how =
     mode === "credits"
-      ? `Included credits · $${(credits ?? 0).toFixed(2)} left`
+      ? `Included credits · ${(credits ?? 0).toFixed(2)} left`
       : mode === "oauth" && sub
         ? `${meta.plan} plan${"via" in sub && sub.via === "codex" ? " via Codex CLI" : ""}${sub.email ? ` · ${sub.email}` : ""}`
         : hasKey
@@ -190,7 +190,7 @@ function ProviderCard({ id, settings }: { id: Provider; settings: PublicSettings
         !!credits && credits > 0 && mode !== "credits" && (
           <div>
             <Button size="sm" variant="soft" disabled={pending} onClick={() => act(() => setConnection(id, "credits"))}>
-              Use included credits · ${credits.toFixed(2)} left
+              Use included credits · {credits.toFixed(2)} left
             </Button>
           </div>
         )
