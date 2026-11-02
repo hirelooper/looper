@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { callModel, CHIEF_INSTRUCTIONS, hireLooper, proposeLooper, type LooperSpec } from "./agent";
 import { deleteCanvas } from "./canvas";
-import { coerce, columnSpec, deleteDatabase, mutateDatabase, readDatabase } from "./database";
+import { coerce, deleteDatabase, mutateDatabase, readDatabase } from "./database";
 import { mutate, read } from "./db";
 import { kv } from "./kv";
 import { hasCredentials, workspaceCredits } from "./llm";
@@ -98,14 +98,23 @@ export async function prefetchSite(domain: string) {
 
 // ——— The business profile and the first metric ———
 
+// Every field required and no size limits in the schema: models keep to them unevenly (Claude's
+// structured output drops min/max, OpenAI's strict mode refuses optional fields), so sizes are
+// asked for in the descriptions and trimmed in code.
+const firstColumn = z.object({
+  name: z.string(),
+  type: z.enum(["text", "number", "currency", "date", "select", "checkbox", "url"]),
+  options: z.array(z.string()).describe("choices for a select column, else empty"),
+});
+
 const tableSpec = z.object({
   name: z.string().describe("the table's name, e.g. 'Search opportunities'"),
   rowNoun: z.string().describe("what one row is, e.g. 'opportunity'"),
-  columns: z.array(columnSpec).min(3).max(9).describe("a title column first; columns web search results can fill today, plus up to 2 the looper fills later from its apps"),
+  columns: z.array(firstColumn).describe("3 to 9 columns: a title column first; columns web search results can fill today, plus up to 2 the looper fills later from its apps"),
 });
 
 const plan = z.object({
-  queries: z.array(z.string()).min(3).max(6).describe("web searches whose results give real rows for this table today, before any app is connected; specific to this business, its market, competitors and customers"),
+  queries: z.array(z.string()).describe("3 to 6 web searches whose results give real rows for this table today, before any app is connected; specific to this business, its market, competitors and customers"),
   table: tableSpec,
 });
 
@@ -122,8 +131,7 @@ const profileSchema = z.object({
         template: z.enum(["none", ...LOOPER_TEMPLATES.map((t) => t.slug)]).describe("a ready-made looper that fits exactly, else 'none'"),
       }),
     )
-    .length(3)
-    .describe("best first: the one that brings revenue or customers soonest"),
+    .describe("exactly 3, best first: the one that brings revenue or customers soonest"),
   firstRows: plan.describe("for the FIRST suggestion only: its table and the searches that fill it today"),
 });
 
@@ -143,6 +151,7 @@ async function profileBusiness(uid: string, input: { site?: SitePage | null; url
     {
       model: db.chatModels?.chief,
       usage: { source: "chief", kind: "chat" },
+      included: true,
       instructions: `${CHIEF_INSTRUCTIONS}\n\nA new owner just joined. Say what the business is, then pick the three business metrics a looper should move first, best first. Prefer numbers that bring revenue or customers and that a looper can move with everyday apps (Gmail, Search Console, social, CRM, docs). Make the three different from each other. Use a ready-made looper when one fits exactly:\n${templateTables()}\n\nFor the first suggestion, also design its table and the web searches that fill it. If it uses a ready-made looper, use that looper's table and columns exactly. ${TABLE_RULES}`,
       prompt: [
         input.site ? `Website: ${input.site.url}\nTitle: ${input.site.title}\nDescription: ${input.site.description}\n\n${input.site.text}` : url ? `Website: ${url} (it couldn't be opened)` : "",
@@ -154,8 +163,9 @@ async function profileBusiness(uid: string, input: { site?: SitePage | null; url
     },
     Output.object({ schema: profileSchema }),
   ).then((r) => r.output as Promise<z.infer<typeof profileSchema>>);
-  const suggestions: MetricSuggestion[] = out.suggestions.map((s) => ({ metric: s.metric, why: s.why, goal: s.goal, ...(s.template !== "none" ? { template: s.template } : {}) }));
-  if (suggestions[0]) suggestions[0].firstRows = out.firstRows;
+  const suggestions: MetricSuggestion[] = out.suggestions.slice(0, 3).map((s) => ({ metric: s.metric, why: s.why, goal: s.goal, ...(s.template !== "none" ? { template: s.template } : {}) }));
+  if (!suggestions.length) throw new Error("Chief suggested no metrics");
+  suggestions[0].firstRows = tidyPlan(out.firstRows);
   return { url, name: out.name || fallbackName, summary: out.summary, customers: out.customers, suggestions, at: now() };
 }
 
@@ -169,6 +179,7 @@ async function planFirstRows(uid: string, profile: BusinessProfile, s: MetricSug
     {
       model: db.chatModels?.chief,
       usage: { source: "chief", kind: "chat" },
+      included: true,
       fast: true,
       instructions: `${CHIEF_INSTRUCTIONS}\n\nDesign the first table for a new looper and the web searches that fill it. ${TABLE_RULES}${t?.spec.database ? `\nUse this table and its columns exactly: "${t.spec.database.name}": ${t.spec.database.columns.map((c) => `${c.name} (${c.type})`).join(", ")}` : ""}`,
       prompt: `The business: ${profile.name} (${profile.url || "no website"}). ${profile.summary} Customers: ${profile.customers}\n\nThe looper will move: ${s.metric}. Goal: ${s.goal}.`,
@@ -176,13 +187,22 @@ async function planFirstRows(uid: string, profile: BusinessProfile, s: MetricSug
     },
     Output.object({ schema: plan }),
   );
-  return (await r.output) as FirstRowsPlan;
+  return tidyPlan((await r.output) as FirstRowsPlan);
+}
+
+/** Sizes the schema only asks for: 3–9 columns, up to 6 searches, select options only on select columns. */
+function tidyPlan(p: FirstRowsPlan): FirstRowsPlan {
+  const columns = p.table.columns
+    .filter((c) => c.name?.trim())
+    .slice(0, 9)
+    .map((c) => (c.type === "select" ? c : { name: c.name, type: c.type }));
+  return { queries: p.queries.filter((q) => q?.trim()).slice(0, 6), table: { ...p.table, columns } };
 }
 
 // ——— Filling the table ———
 
 const rowsSchema = z.object({
-  rows: z.array(z.array(z.string()).describe("one value per column, in column order; empty string when the results don't say")).max(8),
+  rows: z.array(z.array(z.string()).describe("one value per column, in column order; empty string when the results don't say")).describe("up to 8"),
 });
 
 /** Rows for the table from one batch of search results. Only facts the results state; every row cites its source. */
@@ -195,6 +215,7 @@ async function rowsFrom(uid: string, profile: BusinessProfile, table: FirstRowsP
     {
       model: db.chatModels?.chief,
       usage: { source: "chief", kind: "run" },
+      included: true,
       fast: true,
       instructions: `You fill the first rows of a looper's table for ${profile.name} (${profile.url || "no website"}): ${profile.summary} Customers: ${profile.customers}\n\nTable "${table.name}", one row = one ${table.rowNoun}. Columns in order: ${table.columns.map((c) => `${c.name} (${c.type}${c.options?.length ? `: ${c.options.join(" / ")}` : ""})`).join(", ")}.\n\nRules: use only facts in the search results below. Put the result's URL in "${source}". Leave a value empty when the results don't state it; never estimate numbers (impressions, clicks, revenue), because the looper fills those later from its apps. For a status column use its first option. Skip results that aren't useful to this business. Better 4 sharp rows than 8 vague ones.`,
       prompt: hits.map((x, i) => `[${i + 1}] search "${x.query}"\n${x.title}\n${x.url}\n${x.snippet}`).join("\n\n"),
@@ -202,7 +223,7 @@ async function rowsFrom(uid: string, profile: BusinessProfile, table: FirstRowsP
     },
     Output.object({ schema: rowsSchema }),
   );
-  return ((await r.output) as z.infer<typeof rowsSchema>).rows;
+  return ((await r.output) as z.infer<typeof rowsSchema>).rows.slice(0, 8);
 }
 
 /** A table always has somewhere to cite where a row came from. */
@@ -300,7 +321,7 @@ async function hireAndFill(uid: string, run: string, pick: number) {
   const taken = new Set(db.loopers.map((l) => l.name.toLowerCase()));
   const drafting: Promise<LooperSpec> = template
     ? Promise.resolve(structuredClone(template.spec))
-    : proposeLooper(uid, `${s.goal}. Why: ${s.why}`);
+    : proposeLooper(uid, `${s.goal}. Why: ${s.why}`, { included: true });
   const looperReady = drafting.then(async (spec) => {
     if (taken.has(spec.name.toLowerCase())) spec.name = NAMES.find((n) => !taken.has(n.toLowerCase())) ?? `${spec.name} 2`;
     spec.database = table;

@@ -4,7 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createXai } from "@ai-sdk/xai";
 import type { LanguageModel, ToolSet } from "ai";
 import { chatgptAccessToken, listChatGPTModels, RESOURCE, USAGE_URL } from "./oauth/chatgpt";
-import { codexAuth, CODEX_BASE, codexBody, codexHeaders } from "./oauth/codex";
+import { codexAuth, CODEX_BASE, codexBody, codexHeaders, listCodexModels } from "./oauth/codex";
 import { API_BASE, CLI_PROXY_BASE, cliProxyHeaders, grokAccessToken, GROK_USAGE_URL, isGrokEntitlementError } from "./oauth/grok";
 import { creditsLeft, spendCredits } from "./billing";
 import { isLocalServer } from "./db";
@@ -73,16 +73,21 @@ export async function workspaceCredits(uid: string) {
   return creditsLeft(ws);
 }
 
-/** Resolve the model from the user's own subscription (OAuth), API key, or included credits. */
-export async function getModel(uid: string, settings: Settings, choice?: ModelChoice): Promise<ResolvedModel> {
+/**
+ * Resolve the model from the user's own subscription (OAuth), API key, or included credits.
+ * `included` runs on our Claude Sonnet while included credits last (onboarding: the owner's first
+ * minute shouldn't depend on how their own plan or key behaves).
+ */
+export async function getModel(uid: string, settings: Settings, choice?: ModelChoice, opts: { included?: boolean } = {}): Promise<ResolvedModel> {
   const [catalog, credits] = await Promise.all([getCatalog(), workspaceCredits(uid)]);
+  if (opts.included && hasHostedCredits() && credits > 0) return includedModel(uid, catalog, catalog.models.anthropic.find((m) => m.family === "claude-sonnet")?.id ?? recommendedModel(catalog, "anthropic").id);
   const picked = resolveChoice(settings, choice, credits);
   const provider = picked.provider;
   const mode = modeOf(settings, provider);
   let modelId = picked.model || recommendedModel(catalog, provider).id;
-  // A ChatGPT plan may not offer the API's recommended model; then take the plan's first.
-  if (!picked.model && provider === "openai" && mode === "oauth" && !viaCodex(settings)) {
-    const plan = await listChatGPTModels(uid).catch(() => []);
+  // A ChatGPT plan may not offer the API's newest models; then take one the plan lists.
+  if (provider === "openai" && mode === "oauth") {
+    const plan = viaCodex(settings) ? await listCodexModels(uid).catch(() => []) : picked.model ? [] : await listChatGPTModels(uid).catch(() => []);
     if (plan.length && !plan.some((m) => m.id === modelId)) modelId = plan[0].id;
   }
   const price = priceOf(catalog, provider, modelId);
@@ -188,14 +193,7 @@ export async function getModel(uid: string, settings: Settings, choice?: ModelCh
     if (!hasHostedCredits()) throw new Error("Included credits aren't available on this server. Add an Anthropic API key in Settings.");
     if (credits <= 0)
       throw new Error("Your Claude credits for this month are used up. Connect your ChatGPT or Grok plan in Settings (or add an API key) to keep your loopers working, or move to a bigger plan.");
-    return {
-      model: createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(modelId),
-      wrapTools: identity,
-      label: "Included credits",
-      ...meta,
-      // A model without a known price is charged as the priciest Claude, to be safe.
-      meter: (tokens) => spendCredits(uid, usdOf(price ?? priciest(catalog), tokens)),
-    };
+    return includedModel(uid, catalog, modelId);
   }
 
   const apiKey = settings.apiKeys[provider];
@@ -211,6 +209,22 @@ export async function getModel(uid: string, settings: Settings, choice?: ModelCh
     case "anthropic":
       return { model: createAnthropic({ apiKey })(modelId), wrapTools: identity, label: "Anthropic API key", ...meta };
   }
+}
+
+/** Claude on our key, paid from the workspace's included credits. */
+function includedModel(uid: string, catalog: Catalog, modelId: string): ResolvedModel {
+  const price = priceOf(catalog, "anthropic", modelId);
+  return {
+    model: createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(modelId),
+    wrapTools: identity,
+    label: "Included credits",
+    provider: "anthropic",
+    modelId,
+    payer: "us",
+    price,
+    // A model without a known price is charged as the priciest Claude, to be safe.
+    meter: (tokens) => spendCredits(uid, usdOf(price ?? priciest(catalog), tokens)),
+  };
 }
 
 const priciest = (catalog: Catalog) => catalog.models.anthropic.reduce<ModelPrice>((a, m) => (m.price.output > a.output ? m.price : a), { input: 0, output: 0 });
