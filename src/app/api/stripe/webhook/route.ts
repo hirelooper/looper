@@ -1,6 +1,8 @@
 import type Stripe from "stripe";
 import { stripe, syncSubscription } from "@/lib/billing";
 
+const subId = (s: string | { id: string } | null | undefined) => (typeof s === "string" ? s : s?.id);
+
 /** Stripe tells us about subscriptions here; the signature proves it's Stripe. */
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -13,8 +15,14 @@ export async function POST(request: Request) {
   }
   switch (event.type) {
     case "checkout.session.completed": {
-      const s = event.data.object;
-      if (s.subscription) await syncSubscription(await stripe().subscriptions.retrieve(typeof s.subscription === "string" ? s.subscription : s.subscription.id));
+      const id = subId(event.data.object.subscription);
+      if (id) await syncSubscription(await stripe().subscriptions.retrieve(id));
+      break;
+    }
+    // Each paid month starts a new credit period; re-read the subscription so the reset never waits on another event.
+    case "invoice.paid": {
+      const id = subId(event.data.object.parent?.subscription_details?.subscription);
+      if (id) await syncSubscription(await stripe().subscriptions.retrieve(id));
       break;
     }
     case "customer.subscription.created":

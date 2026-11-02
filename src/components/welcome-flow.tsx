@@ -228,7 +228,7 @@ function Live({ view, busy, onOther, onOpen, freeCredits, team }: { view: Onboar
           )}
           {freeCredits !== undefined && (
             <p className="mt-6 text-[0.8125rem] text-mute">
-              {looper.name} runs on ${freeCredits.toFixed(2)} of Claude credits from us.{" "}
+              {looper.name} runs on {freeCredits.toFixed(2)} Claude credits from us.{" "}
               <Link href="/settings" className="text-ink hover:underline">
                 Connect your ChatGPT or Grok plan
               </Link>{" "}
