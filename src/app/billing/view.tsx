@@ -20,6 +20,7 @@ export function BillingView(props: {
   comped: boolean;
   credits: { left: number; granted: number; monthly: boolean };
   infra: { spent: number; cap: number };
+  ownAI: string[];
   plans: { id: Plan; name: string; usd: number; credits: number; blurb: string }[];
   want?: Plan;
   welcome: boolean;
@@ -31,6 +32,7 @@ export function BillingView(props: {
   const [teamName, setTeamName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const current = props.paid && billing && billing.status !== "canceled" ? billing.plan : undefined;
+  const ownAI = props.ownAI.length > 1 ? `${props.ownAI.slice(0, -1).join(", ")} and ${props.ownAI.at(-1)}` : props.ownAI[0];
   const planName = props.comped ? "Complimentary" : current ? props.plans.find((p) => p.id === current)?.name ?? "Paid" : "Free";
 
   const go = (fn: () => Promise<{ ok: true; url: string } | { ok: false; error: string }>, key: string) =>
@@ -64,7 +66,7 @@ export function BillingView(props: {
       <p className="mt-1 text-[0.9375rem] text-mute">{workspace.kind === "team" ? `${workspace.name} · team workspace` : "Your personal workspace"}</p>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        <Stat label="Plan" value={planName} note={billing && current ? statusNote(billing) : props.comped ? "On the house" : billing?.status === "past_due" ? statusNote(billing) : "AI on your own plan or key"} />
+        <Stat label="Plan" value={planName} note={billing && current ? statusNote(billing) : props.comped ? "On the house" : billing?.status === "past_due" ? statusNote(billing) : ownAI ? `AI on your ${ownAI}` : "AI on your own plan or key"} />
         <Stat
           label="Claude credits left"
           value={num(props.credits.left)}
@@ -92,7 +94,7 @@ export function BillingView(props: {
             </div>
             <Features list={FEATURES.free} />
             <a href="/settings" className={cx("mt-4 block rounded-full px-4 py-2.5 text-center text-[0.875rem] font-medium", current ? "bg-ink/[0.05] text-mute hover:text-ink" : "bg-ink/[0.05] hover:bg-ink/[0.08]")}>
-              {current ? "Connect your plan in Settings" : "Current plan · connect your AI"}
+              {ownAI ? (current ? `Also on ${ownAI}` : `Current plan · on ${ownAI}`) : current ? "Connect your plan in Settings" : "Current plan · connect your AI"}
             </a>
           </div>
           {props.plans.map((p) => {
