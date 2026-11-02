@@ -8,7 +8,7 @@ import type { ModelChoice, ModelMenu, ModelOption, ModelPrice, Payer, Provider }
 import { cx } from "./ui";
 
 const providerName = (p: Provider, payer: Payer) => (p === "anthropic" ? "Claude" : p === "xai" ? "Grok" : payer === "plan" ? "ChatGPT" : "OpenAI");
-const PAYER_NAME: Record<Payer, string> = { us: "included credits", key: "your API key", plan: "your plan" };
+const PAYER_NAME: Record<Payer, string> = { us: "uses your credits", key: "your API key", plan: "your plan" };
 
 export const optionValue = (o: Pick<ModelOption, "provider" | "id">) => `${o.provider}:${o.id}`;
 export function parseOption(v: string): ModelChoice {

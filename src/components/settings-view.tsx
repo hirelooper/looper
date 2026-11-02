@@ -16,7 +16,7 @@ import {
 } from "@/app/actions";
 import type { UsageSummary, UsageTotals } from "@/lib/usage";
 import type { IntegrationKind, ModelMenu, Payer, Provider, PublicSettings } from "@/lib/types";
-import { PROVIDERS } from "@/lib/types";
+import { PROVIDERS, publicMode } from "@/lib/types";
 import { ModelOptions, optionValue, parseOption, price, usd } from "./model-picker";
 import { ChatGPTButton, CodexSignIn, GrokMark, GrokSignIn, OpenAIMark } from "./sign-in";
 import { Button, Field, Input, Panel, Pill, Select, cx } from "./ui";
@@ -144,7 +144,7 @@ function ProviderCard({ id, settings }: { id: Provider; settings: PublicSettings
   const sub = settings.subscriptions[id];
   const hasKey = settings.keysSet[id];
   const credits = id === "anthropic" ? settings.creditsLeft : undefined;
-  const mode = settings.authMode[id] ?? (sub ? "oauth" : hasKey ? "key" : credits !== undefined ? "credits" : "key");
+  const mode = publicMode(settings, id);
   const [key, setKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [pending, start] = useTransition();

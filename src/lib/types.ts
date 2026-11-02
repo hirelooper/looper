@@ -455,9 +455,20 @@ export interface LooperCanvas {
   items: CanvasItem[];
 }
 
+/**
+ * How a provider is reached when the workspace never picked: its sign-in, else its key, else (Claude on a
+ * hosted server) the included credits. Workspaces made before credits existed have no saved mode for Claude.
+ */
+export const fallbackMode = (p: Provider, signedIn: boolean, hasKey: boolean, hosted: boolean): AuthMode =>
+  signedIn ? "oauth" : hasKey ? "key" : p === "anthropic" && hosted ? "credits" : "key";
+
+/** The connection mode as the browser sees it; `creditsLeft` is only set on a hosted server. */
+export const publicMode = (s: PublicSettings, p: Provider): AuthMode =>
+  s.authMode[p] ?? fallbackMode(p, !!s.subscriptions[p], !!s.keysSet[p], s.creditsLeft !== undefined);
+
 /** Can loopers call this provider: a sign-in, a key, or included credits left. */
 export function providerReady(s: PublicSettings, p: Provider) {
-  const mode = s.authMode[p] ?? (s.subscriptions[p] ? "oauth" : "key");
+  const mode = publicMode(s, p);
   if (mode === "credits") return p === "anthropic" && (s.creditsLeft ?? 0) > 0;
   // ChatGPT plans only work when Looper runs on the user's own machine.
   if (mode === "oauth") return !!s.subscriptions[p] && (p !== "openai" || s.isLocal || s.subscriptions.openai?.via === "codex");
@@ -465,7 +476,7 @@ export function providerReady(s: PublicSettings, p: Provider) {
 }
 
 /** Runs on the workspace's own plan or key, not only on included credits. */
-export const ownModelReady = (s: PublicSettings) => PROVIDERS.some((p) => (s.authMode[p.id] ?? (s.subscriptions[p.id] ? "oauth" : "key")) !== "credits" && providerReady(s, p.id));
+export const ownModelReady = (s: PublicSettings) => PROVIDERS.some((p) => publicMode(s, p.id) !== "credits" && providerReady(s, p.id));
 
 /** Can loopers call any model with these settings. */
 export const modelReady = (s: PublicSettings) => PROVIDERS.some((p) => providerReady(s, p.id));

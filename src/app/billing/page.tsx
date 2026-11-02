@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { billingEnabled, creditsLeft, INFRA_CAP_USD, infraSpent, onPaidPlan, PLANS } from "@/lib/billing";
 import { requireUser } from "@/lib/session";
-import { PROVIDERS, providerReady } from "@/lib/types";
+import { PROVIDERS, providerReady, publicMode } from "@/lib/types";
 import { getState } from "../actions";
 import { getUser, getWorkspace } from "@/lib/workspace";
 import { BillingView } from "./view";
@@ -14,8 +14,8 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
   const owner = ws ? await getUser(ws.ownerId) : undefined;
   const { settings } = await getState();
   // The AI this workspace already runs on outside included credits, e.g. ["Grok", "ChatGPT"].
-  const ownAI = PROVIDERS.filter((p) => (settings.authMode[p.id] ?? (settings.subscriptions[p.id] ? "oauth" : "key")) !== "credits" && providerReady(settings, p.id)).map((p) =>
-    settings.subscriptions[p.id] && (settings.authMode[p.id] ?? "oauth") === "oauth" ? p.plan : `${p.label} key`,
+  const ownAI = PROVIDERS.filter((p) => publicMode(settings, p.id) !== "credits" && providerReady(settings, p.id)).map((p) =>
+    publicMode(settings, p.id) === "oauth" ? p.plan : `${p.label} key`,
   );
   return (
     <BillingView

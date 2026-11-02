@@ -11,7 +11,7 @@ import { isLocalServer } from "./db";
 import { getCatalog, priceOf, recommendedModel, usdOf, type Catalog, type TokenUsage } from "./models";
 import { getWorkspace, grantSignupCredits } from "./workspace";
 import type { ModelChoice, ModelMenu, ModelOption, ModelPrice, Payer, Provider, Settings } from "./types";
-import { PROVIDERS } from "./types";
+import { fallbackMode, PROVIDERS } from "./types";
 
 type ProviderOptions = Record<string, Record<string, string | number | boolean | null>>;
 
@@ -36,7 +36,7 @@ export const hasHostedCredits = () => !!process.env.ANTHROPIC_API_KEY;
 
 const identity = <T,>(t: T) => t;
 
-const modeOf = (settings: Settings, p: Provider) => settings.authMode[p] ?? (settings.oauth[p] ? "oauth" : "key");
+const modeOf = (settings: Settings, p: Provider) => settings.authMode[p] ?? fallbackMode(p, !!settings.oauth[p], !!settings.apiKeys[p], hasHostedCredits());
 const payerOf = (mode: string): Payer => (mode === "credits" ? "us" : mode === "oauth" ? "plan" : "key");
 
 /** ChatGPT signed in through the Codex CLI's login; it runs anywhere and uses the API's model ids. */
