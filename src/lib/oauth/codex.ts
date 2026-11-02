@@ -207,3 +207,29 @@ export function codexBody(raw: string): string {
   if (json.reasoning) json.include = [...new Set([...(json.include ?? []), "reasoning.encrypted_content"])];
   return JSON.stringify(json);
 }
+
+/**
+ * Models the Codex endpoint serves to this ChatGPT plan, best first. The API catalog runs ahead of
+ * it (e.g. a new GPT that Codex doesn't offer yet), and asking for one fails with model_not_found.
+ * Cached per account for an hour; empty when the endpoint doesn't answer.
+ */
+export async function listCodexModels(uid: string): Promise<{ id: string; name: string }[]> {
+  const { token, accountId } = await codexAuth(uid);
+  const key = `codex-models:${accountId}`;
+  const cached = await kv.get<{ id: string; name: string }[]>(key);
+  if (cached) return cached;
+  const r = await fetch(`${CODEX_BASE}/models?client_version=${CODEX_CLIENT_VERSION}`, {
+    headers: { authorization: `Bearer ${token}`, ...codexHeaders(accountId) },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!r.ok) throw new Error(`Couldn't list Codex models (${r.status})`);
+  const data = (await r.json()) as { models?: { slug: string; display_name?: string; visibility?: string; priority?: number }[] };
+  const models = (data.models ?? [])
+    .filter((m) => m.slug && (m.visibility ?? "list") === "list")
+    .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
+    .map((m) => ({ id: m.slug, name: m.display_name ?? m.slug }));
+  if (models.length) await kv.set(key, models, 3600);
+  return models;
+}
+
+const CODEX_CLIENT_VERSION = "0.60.0";

@@ -1,5 +1,5 @@
 import "server-only";
-import { isStepCount, Output, streamText, tool, type LanguageModelUsage, type ModelMessage, type ToolSet } from "ai";
+import { isStepCount, NoObjectGeneratedError, NoOutputGeneratedError, Output, streamText, tool, type LanguageModelUsage, type ModelMessage, type ToolSet } from "ai";
 import { nanoid } from "nanoid";
 import { after } from "next/server";
 import { z } from "zod";
@@ -71,6 +71,8 @@ interface CallOptions {
   model?: ModelChoice;
   /** who the tokens are logged against: "chief" or a looper id, in a chat or a run */
   usage: { source: string; kind: UsageRow["kind"] };
+  /** run on Claude from the included credits while they last (onboarding) */
+  included?: boolean;
 }
 
 // Models that refused a reasoning-effort setting; we stop sending it to them.
@@ -94,15 +96,23 @@ const tokensOf = (u: LanguageModelUsage) => ({
  * so a hub with thousands of tools costs a handful of definitions per step.
  */
 export async function callModel(uid: string, settings: Settings, opts: CallOptions, output?: Parameters<typeof streamText>[0]["output"]) {
-  const m = await getModel(uid, settings, opts.model);
+  const m = await getModel(uid, settings, opts.model, { included: opts.included });
+  const once = async (fast: boolean) => {
+    const r = await callModelOnce(uid, m, opts, output, fast);
+    // A structured answer that doesn't parse throws here, inside the retry below, not at the caller.
+    if (output) await r.output;
+    return r;
+  };
   try {
-    return await callModelOnce(uid, m, opts, output, !!opts.fast);
+    return await once(!!opts.fast);
   } catch (e) {
     // Some models don't take a reasoning effort; remember and retry without it.
     if (opts.fast && /reasoning/i.test(e instanceof Error ? e.message : String(e))) {
       noEffort.add(`${m.provider}:${m.modelId}`);
-      return callModelOnce(uid, m, opts, output, false);
+      return once(false);
     }
+    // A structured answer that missed the schema once usually fits on a second try.
+    if (output && (NoObjectGeneratedError.isInstance(e) || NoOutputGeneratedError.isInstance(e))) return once(!!opts.fast);
     throw e;
   }
 }
@@ -144,7 +154,7 @@ async function callModelOnce(uid: string, m: ResolvedModel, opts: CallOptions, o
     instructions: opts.instructions,
     ...(opts.messages ? { messages: await fitFiles(opts.messages, m.provider) } : { prompt: opts.prompt ?? "" }),
     tools: Object.keys(all).length ? m.wrapTools(all) : undefined,
-    providerOptions: (fast ? fastOptions(m, m.providerOptions as Record<string, Record<string, unknown>>) : m.providerOptions) as typeof m.providerOptions,
+    providerOptions: withOutputOptions(m, fast ? fastOptions(m, m.providerOptions as Record<string, Record<string, unknown>>) : m.providerOptions, !!output) as typeof m.providerOptions,
     stopWhen: isStepCount(maxSteps),
     prepareStep: ({ stepNumber }) => {
       // Out of time, or on the last step allowed: tools off, so the call always ends in a reply.
@@ -210,10 +220,21 @@ async function callModelOnce(uid: string, m: ResolvedModel, opts: CallOptions, o
       const usd = m.price && usdOf(m.price, tokens);
       await Promise.all([m.meter?.(tokens), recordUsage(uid, { provider: m.provider, model: m.modelId, payer: m.payer, ...opts.usage, tokens, usd })]);
     })
-    .catch((e) => console.error("[usage]", e));
+    // When the call itself failed there may be no usage to read; that failure is reported below.
+    .catch((e) => !failure && console.error("[usage]", e));
   if (stuck) throw new Error(STUCK);
   if (failure) throw failure;
   return result;
+}
+
+/**
+ * OpenAI's strict JSON schema mode rejects ordinary schemas (optional fields, defaults) with
+ * invalid_json_schema; the response is validated against the zod schema here anyway.
+ */
+function withOutputOptions(m: ResolvedModel, options: unknown, structured: boolean) {
+  if (!structured || m.provider !== "openai") return options;
+  const o = (options ?? {}) as Record<string, Record<string, unknown>>;
+  return { ...o, openai: { ...o.openai, strictJsonSchema: false } };
 }
 
 const STUCK = "The model got stuck repeating itself, so Looper stopped it. Anything already saved (rows, cards) is kept. Run it again, or pick another model if it keeps happening.";
@@ -796,7 +817,7 @@ function dedupeApps(apps: AppRef[]) {
 
 export const looperSpec = z.object({
   name: z.string().describe("short, human first name–style, e.g. 'Ivy'"),
-  role: z.string().max(24).optional().describe("one-word role tag, e.g. 'Accounting', 'SEO', 'Sales'"),
+  role: z.string().optional().describe("one-word role tag, e.g. 'Accounting', 'SEO', 'Sales'"),
   area: z
     .enum(["distribution", "operations"])
     .optional()
@@ -804,21 +825,30 @@ export const looperSpec = z.object({
   emoji: z.string().default("◎"),
   mission: z.string(),
   metric: z.object({ name: z.string(), unit: z.string(), direction: z.enum(["up", "down"]), target: z.number(), current: z.number().optional() }),
-  skills: z.array(skillInput).min(1).max(4),
-  apps: z.array(z.string()).max(8).default([]).describe("apps the looper needs, by name, e.g. ['Stripe', 'Gmail', 'bunq']"),
+  skills: z.array(skillInput).describe("1 to 4 skills"),
+  apps: z.array(z.string()).default([]).describe("apps the looper needs, by name, e.g. ['Stripe', 'Gmail', 'bunq']"),
   database: z
-    .object({ name: z.string(), rowNoun: z.string().describe("what one row is, e.g. 'bank transaction'"), columns: z.array(columnSpec).min(2).max(15) })
+    .object({ name: z.string(), rowNoun: z.string().describe("what one row is, e.g. 'bank transaction'"), columns: z.array(columnSpec).describe("2 to 15 columns") })
     .optional()
     .describe("the looper's database: one row per unit of its work"),
   starterCards: z
     .array(z.object({ title: z.string(), for: z.enum(["looper", "you"]).describe("'you' when the owner must act (connect, approve, decide)") }))
-    .max(5)
-    .default([]),
+    .default([])
+    .describe("up to 5"),
 });
 export type LooperSpec = z.infer<typeof looperSpec>;
 
 /** Create a looper from a spec (Chief's create_looper and the guided hiring flow). */
-export async function hireLooper(uid: string, input: LooperSpec) {
+export async function hireLooper(uid: string, spec: LooperSpec) {
+  // Models don't always keep to the sizes the schema asks for; trim here instead of failing the hire.
+  const input: LooperSpec = {
+    ...spec,
+    role: spec.role?.slice(0, 24),
+    skills: spec.skills.slice(0, 4),
+    apps: spec.apps.slice(0, 8),
+    starterCards: spec.starterCards.slice(0, 5),
+    database: spec.database && { ...spec.database, columns: spec.database.columns.slice(0, 15) },
+  };
   const { apps, notFound } = await catalogApps(dedupeApps(input.apps.map(appFromName)));
   const r = await mutate(uid, (db) => {
     const looper: Looper = {
@@ -858,7 +888,7 @@ function businessLine(db: DB) {
 }
 
 /** Chief drafts a looper for a goal without hiring it, so the owner can review it first. */
-export async function proposeLooper(uid: string, goal: string): Promise<LooperSpec> {
+export async function proposeLooper(uid: string, goal: string, opts: { included?: boolean } = {}): Promise<LooperSpec> {
   const db = await read(uid);
   const team = db.loopers.map((l) => `- ${l.name}: ${metricLine(l)}`).join("\n") || "- nobody yet";
   const result = await callModel(
@@ -867,6 +897,7 @@ export async function proposeLooper(uid: string, goal: string): Promise<LooperSp
     {
       model: db.chatModels?.chief,
       usage: { source: "chief", kind: "chat" },
+      included: opts.included,
       instructions: `${CHIEF_INSTRUCTIONS}${businessLine(db)}\n\nToday is ${new Date().toDateString()}. Current team (pick a name that isn't taken):\n${team}`,
       prompt: `Draft one looper for this goal, ready to hire: ${goal}\n\nInclude the apps it needs, a database (5–10 columns), 1–3 skills on sensible schedules whose instructions name the apps, and up to 3 starter cards. If the goal doesn't say the current value, leave metric.current out.`,
       maxSteps: 1,
