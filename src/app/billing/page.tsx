@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { billingEnabled, CREDIT_MARKUP, creditsLeft, INFRA_CAP_USD, infraSpent, onPaidPlan, PLANS } from "@/lib/billing";
+import { billingEnabled, creditsLeft, INFRA_CAP_USD, infraSpent, onPaidPlan, PLANS } from "@/lib/billing";
 import { requireUser } from "@/lib/session";
 import { getUser, getWorkspace } from "@/lib/workspace";
 import { BillingView } from "./view";
@@ -21,7 +21,6 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
       paid={onPaidPlan(ws, owner?.email)}
       comped={!!ws?.comped}
       credits={{ left: creditsLeft(ws), granted: ws?.credits?.granted ?? 0, monthly: !!ws?.credits?.plan }}
-      markup={CREDIT_MARKUP}
       infra={{ spent: infraSpent(ws), cap: INFRA_CAP_USD }}
       plans={Object.entries(PLANS).map(([id, p]) => ({ id: id as keyof typeof PLANS, name: p.name, usd: p.usd, credits: p.credits, blurb: p.blurb }))}
       want={plan === "team" || plan === "personal" ? plan : undefined}

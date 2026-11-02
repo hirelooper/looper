@@ -19,7 +19,6 @@ export function BillingView(props: {
   paid: boolean;
   comped: boolean;
   credits: { left: number; granted: number; monthly: boolean };
-  markup: number;
   infra: { spent: number; cap: number };
   plans: { id: Plan; name: string; usd: number; credits: number; blurb: string }[];
   want?: Plan;
@@ -136,8 +135,7 @@ export function BillingView(props: {
       {error && <p className="mt-4 text-[0.875rem] text-red">{error}</p>}
 
       <p className="mt-8 text-[0.8125rem] leading-relaxed text-mute">
-        Credits pay for Claude on our key while your loopers work. One credit is $1 of usage at Looper prices, which are {props.markup}× the model&apos;s list price: a run that costs
-        Anthropic $0.40 uses {num(0.4 * props.markup)} credits. Credits reset at the start of each billing month and don&apos;t roll over. On any plan, your own ChatGPT or Grok plan
+        Credits pay for Claude while your loopers work, at Looper prices: one credit is $1 of usage. They reset at the start of each billing month and don&apos;t roll over. On any plan, your own ChatGPT or Grok plan
         or API key costs nothing extra. Each workspace includes up to ${props.infra.cap} of computer time a month. Prefer to run it yourself? Self-hosting is free:{" "}
         <a href="https://github.com/HireLooper-com/looper" className="underline hover:text-ink">
           the code is on GitHub
