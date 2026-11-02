@@ -48,6 +48,16 @@ export function hasAccess(ws: Workspace | undefined, ownerEmail?: string) {
   return !!ws.billing && ACTIVE.has(ws.billing.status);
 }
 
+/** What the account menu offers: upgrade without a paid plan, the Stripe portal with one. */
+export type SubscriptionState = { state: "none" | "active" | "past_due" | "comped"; isOwner: boolean };
+export function subscriptionOf(ws: Workspace | undefined, ownerEmail: string | undefined, isOwner: boolean): SubscriptionState {
+  if (ws?.comped || (ownerEmail && compedEmails().includes(ownerEmail.toLowerCase()))) return { state: "comped", isOwner };
+  const status = ws?.billing?.subscriptionId ? ws.billing.status : undefined;
+  if (status === "past_due") return { state: "past_due", isOwner };
+  if (status && ACTIVE.has(status)) return { state: "active", isOwner };
+  return { state: "none", isOwner };
+}
+
 const month = () => new Date().toISOString().slice(0, 7);
 export const infraSpent = (ws: Workspace | undefined) => (ws?.infra?.month === month() ? ws.infra.usd : 0);
 

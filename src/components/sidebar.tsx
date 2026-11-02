@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { signOutApp } from "@/app/actions";
+import { openBillingPortal } from "@/app/billing-actions";
+import type { SubscriptionState } from "@/lib/billing";
 import { switchWorkspace } from "@/app/workspace-actions";
 import { AREAS, type Accent, type Area } from "@/lib/types";
 import { WorkingTray } from "./activity";
@@ -48,6 +50,7 @@ export function Sidebar({
   workspace,
   workspaces,
   billing,
+  subscription,
   credits,
   chiefPreview,
   inboxCount,
@@ -58,6 +61,8 @@ export function Sidebar({
   workspace: WorkspaceRef & { plan?: string };
   workspaces: WorkspaceRef[];
   billing: boolean;
+  /** Hosted only: whether to offer an upgrade or the Stripe portal */
+  subscription?: SubscriptionState;
   /** Included Claude credits in USD, when the workspace was granted any; invite when no plan or key is connected */
   credits?: { left: number; granted: number; invite: boolean };
   chiefPreview?: string;
@@ -68,6 +73,15 @@ export function Sidebar({
   const path = usePathname();
   const router = useRouter();
   const [menu, setMenu] = useState(false);
+  const [portal, setPortal] = useState<"idle" | "opening" | string>("idle");
+  const upgrade = subscription?.state === "none" && subscription.isOwner;
+  const manage = (subscription?.state === "active" || subscription?.state === "past_due") && subscription.isOwner;
+  const openPortal = async () => {
+    setPortal("opening");
+    const r = await openBillingPortal();
+    if (r.ok) window.location.assign(r.url);
+    else setPortal(r.error);
+  };
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!menu) return;
@@ -175,6 +189,18 @@ export function Sidebar({
 
         <div className="relative border-t border-ink/[0.06] p-2" ref={menuRef}>
           {credits && <CreditsMeter {...credits} billing={billing} />}
+          {upgrade && (
+            <Link href="/billing" className="mb-1 flex items-center justify-between gap-2 rounded-[14px] bg-ink/[0.05] px-3 py-2.5 text-[0.8125rem] hover:bg-ink/[0.08]">
+              <span className="min-w-0 truncate text-mute">{workspace.kind === "team" ? "This team has no plan yet" : "You are on the free trial"}</span>
+              <span className="shrink-0 rounded-full bg-ink px-3 py-1 text-[0.75rem] font-medium text-page">Upgrade</span>
+            </Link>
+          )}
+          {manage && subscription?.state === "past_due" && (
+            <button onClick={openPortal} className="mb-1 flex w-full items-center justify-between gap-2 rounded-[14px] bg-red/10 px-3 py-2.5 text-left text-[0.8125rem] hover:bg-red/15">
+              <span className="min-w-0 truncate text-red">Payment failed</span>
+              <span className="shrink-0 font-medium text-red">{portal === "opening" ? "Opening…" : "Update card"}</span>
+            </button>
+          )}
           <button onClick={() => setMenu((m) => !m)} aria-label="Account and workspaces" aria-expanded={menu} className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left hover:bg-ink/[0.03]">
             <Avatar account={account} />
             <span className="min-w-0 flex-1">
@@ -207,6 +233,18 @@ export function Sidebar({
                 + New team workspace
               </Link>
               <div className="my-1 h-px bg-line" />
+              {upgrade && (
+                <Link href="/billing" onClick={() => setMenu(false)} className="block rounded-[8px] px-3 py-2 text-[0.875rem] font-medium hover:bg-ink/[0.04]">
+                  Upgrade
+                </Link>
+              )}
+              {manage && (
+                <button onClick={openPortal} disabled={portal === "opening"} className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-left text-[0.875rem] hover:bg-ink/[0.04]">
+                  {portal === "opening" ? "Opening Stripe…" : "Manage subscription"}
+                  <span className="text-[0.75rem] text-mute">{workspace.plan}</span>
+                </button>
+              )}
+              {portal !== "idle" && portal !== "opening" && <p className="px-3 pb-1 text-[0.75rem] text-red">{portal}</p>}
               {[
                 [workspace.kind === "team" ? "Members & invites" : "Workspace", "/workspace"],
                 ...(billing ? [["Plan & credits", "/billing"]] : []),

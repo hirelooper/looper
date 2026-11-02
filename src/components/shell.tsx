@@ -6,7 +6,7 @@ import { isDue } from "@/lib/schedule";
 import { areaOf } from "@/lib/types";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { billingEnabled, creditsLeft, hasAccess } from "@/lib/billing";
+import { billingEnabled, creditsLeft, hasAccess, subscriptionOf } from "@/lib/billing";
 import { hasHostedCredits, ownModelConnected } from "@/lib/llm";
 import { currentUser } from "@/lib/session";
 import { isAdmin } from "@/lib/usage";
@@ -68,6 +68,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
         workspace={{ id: user.ws, name: ws?.name ?? "Personal", kind: ws?.kind ?? "personal", plan: ws?.billing ? (ws.billing.plan === "team" ? "Team plan" : "Personal plan") : ws?.comped ? "Complimentary" : undefined }}
         workspaces={all.map((w) => ({ id: w.id, name: w.name, kind: w.kind }))}
         billing={billingEnabled()}
+        subscription={billingEnabled() ? subscriptionOf(ws, owner?.email, ws?.ownerId === user.id) : undefined}
         credits={credits}
         admin={isAdmin(user.email)}
       />
