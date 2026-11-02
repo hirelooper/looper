@@ -18,7 +18,7 @@ import { fmt } from "./ui";
 /** Signed-in frame: the looper rail on the left, the page on the right. Signed out: just the page. */
 export async function Shell({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
-  const crispId = process.env.CRISP_WEBSITE_ID;
+  const crispId = "430b1519-2896-4e80-bc81-bbad92f0c968"; // hirelooper.com Crisp workspace
   if (!user)
     return (
       <>
